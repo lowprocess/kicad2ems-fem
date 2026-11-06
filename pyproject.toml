@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kicad2ems-palace"
+dynamic = ["version"]
+description = "Palace (AWS's 3D finite-element solver) as a kicad2ems solver: the board meshed by gmsh, solved by Palace"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+authors = [{ name = "Claude", email = "noreply@anthropic.com" }]
+dependencies = [
+    "kicad2ems>=261028.post1",     # kicad2ems.api.solver 2.1
+    "numpy>=1.24",
+    "shapely>=2.0",
+    "gmsh>=4.11",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.entry-points."kicad2ems.solvers"]
+palace = "kicad2ems_palace.plugin:Palace"
+
+[tool.setuptools.dynamic]
+version = {attr = "kicad2ems_palace.__version__"}
