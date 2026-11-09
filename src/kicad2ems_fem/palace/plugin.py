@@ -22,7 +22,7 @@ def palace_status():
     how = launcher()
     if how is None:
         return False, ("Palace not found: set K2E_PALACE to its `palace` executable, or K2E_PALACE_ROOTFS to an "
-                       "unpacked Palace image run in podman (kicad2ems-palace README)")
+                       "unpacked Palace image run in podman (kicad2ems-fem README)")
     try:
         import gmsh                                         # noqa: F401
     except ImportError:

@@ -7,7 +7,7 @@ import pytest
 from shapely.geometry import box
 
 from kicad2ems.board import Port
-from kicad2ems_palace import config, model, run
+from kicad2ems_fem.palace import config, model, run
 
 
 def microstrip(vias=()):

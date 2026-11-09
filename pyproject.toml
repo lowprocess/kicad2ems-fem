@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kicad2ems-palace"
+name = "kicad2ems-fem"
 dynamic = ["version"]
-description = "Palace (AWS's 3D finite-element solver) as a kicad2ems solver: the board meshed by gmsh, solved by Palace"
+description = "kicad2ems's finite-element solvers: the board meshed by gmsh, solved by Palace (S-parameters) or Elmer (DC IR drop)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-or-later"}
@@ -21,7 +21,10 @@ dependencies = [
 test = ["pytest>=7"]
 
 [project.entry-points."kicad2ems.solvers"]
-palace = "kicad2ems_palace.plugin:Palace"
+palace = "kicad2ems_fem.palace.plugin:Palace"
+
+[project.scripts]
+kicad2ems-fem-dc = "kicad2ems_fem.elmer.dc:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "kicad2ems_palace.__version__"}
+version = {attr = "kicad2ems_fem.__version__"}
