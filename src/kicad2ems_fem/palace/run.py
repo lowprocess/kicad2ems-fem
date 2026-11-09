@@ -11,7 +11,6 @@ Palace is found as
                       run in rootless podman with that as its root, no network, as the user; default
                       ~/opt/palace/rootfs
 """
-import glob
 import os
 import shutil
 import subprocess

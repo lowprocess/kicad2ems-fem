@@ -1,5 +1,4 @@
 """The Palace model, config and output reading, without Palace (tests/test_palace_run.py runs it)."""
-import os
 from types import SimpleNamespace
 
 import numpy as np
@@ -40,8 +39,9 @@ def test_microstrip_mesh_has_every_attribute(tmp_path):
     p = str(tmp_path / 'm.msh')
     mdl = model.build(microstrip(), 10e9, p, log=lambda *a: None)
     g = groups(p)
-    assert set(g) == {(3, model.DIEL0), (3, model.AIR), (2, model.PEC), (2, model.ABSORB),
-                      (2, model.PORT0), (2, model.PORT0 + 1)}
+    assert set(g) == {(3, model.DIEL0), (3, model.AIR), (2, model.CU0), (2, model.CU0 + 1), (2, model.ABSORB),
+                      (2, model.PORT0), (2, model.PORT0 + 1)}             # each copper layer its own sheets
+    assert mdl.sheets == [(model.CU0, 0.035), (model.CU0 + 1, 0.035)] and mdl.via_wall is None
     assert all(n > 0 for n in g.values())
     assert mdl.hmin == pytest.approx(0.5)                   # the slab's thickness is the smallest feature
     assert [q['direction'] for q in mdl.ports] == ['+Z', '+Z']
@@ -52,7 +52,7 @@ def test_vias_are_holes_with_pec_walls(tmp_path):
     model.build(microstrip(), 10e9, a, log=lambda *x: None)
     model.build(microstrip([(5.0, 2.0, 0.2, 0.0, 0.5)]), 10e9, b, log=lambda *x: None)
     ga, gb = groups(a), groups(b)
-    assert gb[(2, model.PEC)] > ga[(2, model.PEC)]          # the barrel's wall is PEC
+    assert (2, model.PEC) in gb and (2, model.PEC) not in ga   # the barrel's wall is PEC
     # the hole is not meshed: no tetrahedron of the slab has its centre inside the barrel
     import gmsh
     gmsh.initialize()
@@ -96,3 +96,16 @@ def test_podman_command_puts_options_before_the_root(tmp_path):
     cmd, cwd = run.command(str(tmp_path), 'palace.json', 4, how=('podman', '/r'))
     assert cmd.index('--rootfs') == len(cmd) - 5 and cmd[-4] == '/r:O' and cmd[-3:-1] == ['bash', '-c']
     assert 'palace -np 4' in cmd[-1]
+
+
+def test_config_loss_puts_conductivity_on_the_sheets_and_via_walls():
+    mdl = model.Model('w/model.msh', [(1, 3.5, 0.002)], model.AIR, [model.CU0, model.PEC], model.ABSORB,
+                      [dict(attr=201, index=1, R=50.0, direction='+Z', name='P1')], 0.1, 1.0, 5.0,
+                      sheets=[(model.CU0, 0.035)], via_wall=model.PEC)
+    lossless = config.config(mdl, [1e9])['Boundaries']
+    assert lossless['PEC'] == dict(Attributes=[model.CU0, model.PEC]) and 'Conductivity' not in lossless
+    lossy = config.config(mdl, [1e9], loss=True)['Boundaries']
+    assert 'PEC' not in lossy
+    assert lossy['Conductivity'] == [
+        dict(Attributes=[model.CU0], Conductivity=5.8e7, Thickness=0.035, External=False),
+        dict(Attributes=[model.PEC], Conductivity=5.8e7, Thickness=0.025, External=True)]

@@ -18,7 +18,7 @@ G = 'palace'
 
 
 def palace_status():
-    from .run import launcher, command
+    from .run import launcher
     how = launcher()
     if how is None:
         return False, ("Palace not found: set K2E_PALACE to its `palace` executable, or K2E_PALACE_ROOTFS to an "
@@ -38,7 +38,9 @@ class Palace(Solver):
     rank, order = 2, 40
     capabilities = dict(ports='yes: lumped', gap_ports='yes: lumped', diff_pairs='yes', parts='no', vias='yes',
                         outline='yes', planes='yes', edge_walls='no', thickness='approximated: zero-thickness sheets',
-                        conductor_loss='no: PEC', roughness='no', finish='no', dispersion='no: er, tand at one value',
+                        conductor_loss='optional (--palace-loss): finite-thickness surface impedance on the sheets; '
+                                       'good to ~10 MHz, high above (edge singularity)',
+                        roughness='no', finish='no', dispersion='no: er, tand at one value',
                         radiation='yes: absorbing boundary', cavity='yes', antenna='no')
     options = [
         Option('palace_order', 2, "Palace's element order (default {default})", int, name='order',
@@ -53,6 +55,8 @@ class Palace(Solver):
                "the stack)", float, name='margin', gui='Palace air margin (mm)', group=G),
         Option('palace_np', 8, "Palace's MPI processes (default {default}: the P-cores)", int, name='np',
                gui='Palace processes', group=G),
+        Option('palace_loss', False, "copper loss: the sheets as Palace's finite-thickness conductivity boundary "
+               "instead of PEC (good to ~10 MHz; high above)", bool, name='loss', gui='Palace copper loss', group=G),
     ]
 
     def check(self, s=None):
@@ -86,7 +90,7 @@ class Palace(Solver):
         from kicad2ems.api.solver import mixed_mode
         from . import config, run as prun
         s, work, mdl = run.s, prep['work'], prep['model']
-        cfg = config.config(mdl, run.freq, order=s.palace_order, tol=s.palace_tol)
+        cfg = config.config(mdl, run.freq, order=s.palace_order, tol=s.palace_tol, loss=bool(s.palace_loss))
         with open(os.path.join(work, 'palace.json'), 'w') as fh:
             json.dump(cfg, fh, indent=1)
         t = time.time()

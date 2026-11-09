@@ -22,7 +22,8 @@ from shapely.geometry import Polygon, MultiPolygon
 C0 = 299792458.0
 # physical-group attributes (Palace's mesh attributes)
 DIEL0, AIR = 1, 99                  # dielectric slab i: DIEL0 + i
-PEC, ABSORB, PORT0 = 100, 101, 201  # port i (0-based, board order): PORT0 + i
+PEC, ABSORB, PORT0 = 100, 101, 201  # PEC: the via walls; port i (0-based, board order): PORT0 + i
+CU0 = 110                           # copper layer i's sheets (board.cu_z order): CU0 + i (its own thickness when lossy)
 
 
 @dataclass
@@ -30,7 +31,7 @@ class Model:
     path: str
     diel: list                      # [(attribute, er, tand)] one per slab
     air: int
-    pec: int
+    pec: object                     # the metal's attributes (a list; an int in older callers): PEC when lossless
     absorb: int
     ports: list                     # [dict(attr, index, R, direction, name)]
     hmin: float
@@ -38,6 +39,8 @@ class Model:
     margin: float
     nodes: int = 0
     tets: int = 0
+    sheets: list = field(default_factory=list)     # [(attribute, thickness mm)]: each copper layer's sheets
+    via_wall: int = None                            # the via walls' attribute (PEC), or None without vias
     notes: list = field(default_factory=list)
 
 
@@ -126,7 +129,7 @@ def build(board, fmax, path, margin=None, hmin=None, hmax=None, per_feature=1.0,
             z = board.cu_z[lay]
             for g in polys:
                 for poly in _polys(g):
-                    add('cu', [(2, _surface(occ, poly.buffer(0), z))])
+                    add(('cu', lay), [(2, _surface(occ, poly.buffer(0), z))])
         for v in board.vias:                                    # the via barrels (holes)
             x, y, r, za, zc = v[:5]
             if zc > za:
@@ -158,11 +161,15 @@ def build(board, fmax, path, margin=None, hmin=None, hmax=None, per_feature=1.0,
                 diel_v.setdefault(d[0][1], []).append(dt[1])
         air_v = [dt[1] for dt in vols if dt not in via_v and not any(isinstance(r, tuple) and r[0] == 'diel'
                                                                          for r in role_of.get(dt, ()))]
-        # the copper: the sheet pieces, plus the via walls (the faces of the via holes not shared with air)
-        cu = {dt[1] for dt in gmsh.model.getEntities(2) if 'cu' in role_of.get(dt, ())}
+        # the copper: each layer's sheet pieces; the via walls (the faces of the via holes not shared with air)
+        cu_l = {lay: {dt[1] for dt in gmsh.model.getEntities(2) if ('cu', lay) in role_of.get(dt, ())}
+                for lay in board.copper}
+        walls = set()
         for dt in via_v:
             for f in gmsh.model.getBoundary([dt], oriented=False):
-                cu.add(abs(f[1]))
+                walls.add(abs(f[1]))
+        for s in cu_l.values():
+            s.difference_update(walls)
         bb = (x0 - margin, y0 - margin, zb - margin, x1 + margin, y1 + margin, zt + margin)
         outer = []
         for _, s in gmsh.model.getEntities(2):
@@ -178,7 +185,9 @@ def build(board, fmax, path, margin=None, hmin=None, hmax=None, per_feature=1.0,
         for k, ss in port_s.items():
             if not ss:
                 raise RuntimeError(f"port {board.ports[k].name}: its sheet is lost in the mesh")
-            cu.difference_update(ss)
+            walls.difference_update(ss)
+            for s in cu_l.values():
+                s.difference_update(ss)
 
         diel = []
         for i, l in enumerate(board.layers):
@@ -186,7 +195,15 @@ def build(board, fmax, path, margin=None, hmin=None, hmax=None, per_feature=1.0,
                 gmsh.model.addPhysicalGroup(3, diel_v[i], DIEL0 + i)
                 diel.append((DIEL0 + i, l['er'], l['tand']))
         gmsh.model.addPhysicalGroup(3, air_v, AIR)
-        gmsh.model.addPhysicalGroup(2, sorted(cu), PEC)
+        sheets = []
+        order = list(board.cu_z)
+        for lay, s in cu_l.items():
+            if s:
+                attr = CU0 + order.index(lay)
+                gmsh.model.addPhysicalGroup(2, sorted(s), attr)
+                sheets.append((attr, float(getattr(board, 'cu_t', {}).get(lay, 0.035))))
+        if walls:
+            gmsh.model.addPhysicalGroup(2, sorted(walls), PEC)
         gmsh.model.addPhysicalGroup(2, outer, ABSORB)
         ports = []
         for k, p in enumerate(board.ports):
@@ -199,6 +216,7 @@ def build(board, fmax, path, margin=None, hmin=None, hmax=None, per_feature=1.0,
 
         # sizes: fine at the copper edges and the ports, graded out to hmax
         edges = set()
+        cu = set(walls).union(*cu_l.values())
         for s in list(cu) + [t for ss in port_s.values() for t in ss]:
             for c in gmsh.model.getBoundary([(2, s)], oriented=False):
                 edges.add(abs(c[1]))
@@ -229,7 +247,9 @@ def build(board, fmax, path, margin=None, hmin=None, hmax=None, per_feature=1.0,
     finally:
         gmsh.finalize()
     log(f"palace mesh: {tets:,} tetrahedra, {nodes:,} nodes; h {hmin:.3g}..{hmax:.3g} mm, air margin {margin:.3g} mm")
-    return Model(path, diel, AIR, PEC, ABSORB, ports, hmin, hmax, margin, nodes, tets, notes)
+    metal = [a for a, _ in sheets] + ([PEC] if walls else [])
+    return Model(path, diel, AIR, metal, ABSORB, ports, hmin, hmax, margin, nodes=nodes, tets=tets, notes=notes,
+                 sheets=sheets, via_wall=PEC if walls else None)
 
 
 def _vertical(occ, axis, s, e):
