@@ -25,7 +25,7 @@ PLATING = 0.025
 
 def sif(m, loads):
     """The .sif: the source pads at 0 V, each load an equipotential terminal drawing its current (Potential Constant
-    with a flux); Joule heating integrated, each load's mean potential saved."""
+    with a flux); each load's mean potential saved."""
     bodies = "Body 1\n  Target Bodies(1) = 1\n  Equation = 1\n  Material = 1\nEnd\n"
     if m['barrels']:
         bodies += "Body 2\n  Target Bodies(1) = 2\n  Equation = 1\n  Material = 2\nEnd\n"
@@ -35,7 +35,7 @@ def sif(m, loads):
         bcs.append(f"Boundary Condition {k + 2}\n  Name = \"{name}\"\n  Target Boundaries(1) = {m['boundaries'][name]}\n"
                    f"  Potential Constant = Logical True\n  Potential Constant Flux = Real {-amps:.12g}\n"
                    f"  load{k} = Logical True\nEnd\n")
-        masks.append(f"  Variable {k + 2} = Potential\n  Operator {k + 2} = boundary mean\n  Mask Name {k + 2} = load{k}\n")
+        masks.append(f"  Variable {k + 1} = Potential\n  Operator {k + 1} = boundary mean\n  Mask Name {k + 1} = load{k}\n")
     return f"""Header
   Mesh DB "." "mesh"
 End
@@ -59,7 +59,6 @@ Solver 1
   Equation = "StatCurrent"
   Variable = "Potential"
   Procedure = "StatCurrentSolveVec" "StatCurrentSolver"
-  Calculate Joule Heating = Logical True
   ! direct: the thin copper slabs' flat elements made the iterative solvers diverge
   Linear System Solver = "Direct"
   Linear System Direct Method = "Umfpack"
@@ -69,8 +68,6 @@ Solver 2
   Equation = "SaveScalars"
   Procedure = "SaveData" "SaveScalars"
   Filename = "scalars.dat"
-  Variable 1 = Joule Heating
-  Operator 1 = int
 {''.join(masks)}End
 {''.join(bcs)}"""
 
@@ -96,7 +93,9 @@ def solve(board, nets, source, loads, out='dc', h=0.25, h_fine=0.05, plating=PLA
     s = elmer.scalars(case / 'scalars.dat')
     V = {ref: float(next(v for c, v in s.items() if 'potential' in c.lower() and f'load{k}' in c.lower()))
          for k, ref in enumerate(loads)}
-    loss = float(next(v for c, v in s.items() if 'joule' in c.lower()))
+    # the power the loads draw through the copper. Not Elmer's Joule heating field: the loop that fills it is not
+    # safe with several threads (StatCurrentSolver_post), and now and then gives another figure
+    loss = float(sum(-V[ref] * amps for ref, amps in loads.items()))
     result = dict(format=1, nets=sorted(nets), source=source, loads=dict(loads), V=V,
                   drop_mV={r: -v * 1e3 for r, v in V.items()}, loss_W=loss, tets=m['tets'], vias=m['vias'],
                   h=h, h_fine=h_fine, seconds=dict(mesh=round(mesh_s, 1), solve=round(time.perf_counter() - t, 1)))

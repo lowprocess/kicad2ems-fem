@@ -4,6 +4,8 @@ Running Palace and reading its S-parameters.
     launcher()                            # how Palace is started here: ('native', path) or ('podman', rootfs), or None
     run(workdir, 'palace.json', np=8)     # runs it there, returns its log
     f, S = read_s(workdir + '/postpro', nports)
+    f, P = read_incident(workdir + '/postpro', 1)         # the driven port's incident power, each solve
+    f, th, ph, E = read_farfield(workdir + '/postpro')    # the far field r E at the config's angles
 
 Palace is found as
   K2E_PALACE          a `palace` executable (its MPI wrapper), or `palace` on PATH: run directly
@@ -14,6 +16,7 @@ Palace is found as
 import os
 import shutil
 import subprocess
+import time
 
 import numpy as np
 
@@ -46,15 +49,21 @@ def command(workdir, cfg, np=8, threads=1, how=None):
             '-v', f'{os.path.abspath(workdir)}:/work:Z', '--rootfs', f'{where}:O', 'bash', '-c', env], None
 
 
-def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None):
+def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None, logfile='palace.log'):
     cmd, cwd = command(workdir, cfg, np, threads, how)
-    with open(os.path.join(workdir, 'palace.log'), 'w') as fh:
+    with open(os.path.join(workdir, logfile), 'w') as fh:
         p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        tail = []
+        tail, shown = [], 0.0
         for line in p.stdout:
             fh.write(line)
+            fh.flush()                                      # the log can be followed while Palace runs
             tail = (tail + [line.rstrip()])[-40:]
-            if line.lstrip().startswith(('It ', 'Computing', 'Adaptive', 'Elapsed', 'Total')):
+            head = line.lstrip()
+            if head.startswith('It '):                      # one a second: the swept model answers 100s at once
+                if time.time() - shown < 1.0:
+                    continue
+                shown = time.time()
+            if head.startswith(('It ', 'Computing', 'Adaptive', 'Greedy', 'Elapsed', 'Total')):
                 log('palace: ' + line.strip())
         rc = p.wait(timeout)
     if rc:
@@ -77,6 +86,54 @@ def read_s(postpro, n):
         if not m:
             continue
         i, j = int(m.group(1)) - 1, int(m.group(2)) - 1
+        if i >= n or j >= n:                                # a lumped part's boundary: not a port of the board
+            continue
         a = cols.index(f'arg(S[{i + 1}][{j + 1}]) (deg.)')
         S[:, i, j] = 10 ** (data[:, c] / 20) * np.exp(1j * np.radians(data[:, a]))
     return f, S
+
+
+def table(path):
+    """(column names, rows) of one of Palace's CSV files."""
+    with open(path) as fh:
+        cols = [h.strip() for h in fh.readline().split(',')]
+    return cols, np.loadtxt(path, delimiter=',', skiprows=1, ndmin=2)
+
+
+def read_incident(postpro, index):
+    """(f Hz, P W (nf,)) of the driven lumped port `index` (1-based): the incident wave's power, 0.5 V_inc I_inc
+    of port-V.csv and port-I.csv (peak phasors). The port's own V and I there are those of its resistor, so the
+    power into the model is this times 1 - |S11|^2."""
+    out = []
+    for name, q in (('port-V.csv', 'V'), ('port-I.csv', 'I')):
+        cols, data = table(os.path.join(postpro, name))
+        c = [k for k, h in enumerate(cols) if h.startswith(f'{q}_inc[{index}]')]
+        if len(c) != 1:
+            raise ValueError(f"{name}: no single column of {q}_inc[{index}] in {cols}")
+        out.append(data[:, c[0]])
+    return data[:, 0] * 1e9, 0.5 * out[0] * out[1]
+
+
+def read_farfield(postpro):
+    """(f Hz (nf,), theta, phi deg (n,), E (nf, n, 3) complex) from Palace's farfield-rE.csv: the far field times
+    the distance, r E (V), in Cartesian components, at the config's angles (one excitation)."""
+    cols, data = table(os.path.join(postpro, 'farfield-rE.csv'))
+    f = data[:, 0]
+    freqs = np.unique(f)
+    first = data[f == freqs[0]]
+    n = len(first)
+    if len(data) != n * len(freqs):
+        raise ValueError(f"farfield-rE.csv: {len(data)} rows, not {len(freqs)} frequencies x {n} angles")
+    E = np.empty((len(freqs), n, 3), complex)
+    comp = [[c for c, h in enumerate(cols) if h.startswith(f'r*{part}{{E_{x}}}')] for x in 'xyz' for part in ('Re', 'Im')]
+    ang = [[c for c, h in enumerate(cols) if h.startswith(a)] for a in ('theta', 'phi')]
+    if any(len(c) != 1 for c in comp + ang):
+        raise ValueError(f"farfield-rE.csv: unexpected columns {cols}")
+    th, ph = ang[0][0], ang[1][0]
+    for i, fi in enumerate(freqs):
+        d = data[f == fi]
+        if not (np.allclose(d[:, th], first[:, th]) and np.allclose(d[:, ph], first[:, ph])):
+            raise ValueError("farfield-rE.csv: the angles differ between frequencies")
+        for x in range(3):
+            E[i, :, x] = d[:, comp[2 * x][0]] + 1j * d[:, comp[2 * x + 1][0]]
+    return freqs * 1e9, first[:, th], first[:, ph], E

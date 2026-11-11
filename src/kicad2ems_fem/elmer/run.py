@@ -3,6 +3,7 @@
     found()                                  # (True, where) or (False, why)
     elmergrid(msh, folder)                   # Elmer's mesh folder from a gmsh .msh (version 2)
     solve(case_folder, sif_text)             # ElmerSolver's log; raises with the log's tail on failure
+                                             # (threads=1: for a .sif whose solvers are not thread safe)
     scalars(path)                            # {column name: value} of a SaveScalars file
 
 Elmer is found as K2E_ELMER (the folder with ElmerSolver and ElmerGrid) or on PATH.
@@ -43,11 +44,13 @@ def elmergrid(msh, folder):
     return folder
 
 
-def solve(case, sif_text, timeout=7200):
+def solve(case, sif_text, timeout=7200, threads=None):
+    """threads: OMP_NUM_THREADS for this run (None: as the environment has it)."""
     case = Path(case)
     (case / 'case.sif').write_text(sif_text)
     (case / 'ELMERSOLVER_STARTINFO').write_text('case.sif\n1\n')
-    p = subprocess.run([_tool('ElmerSolver'), 'case.sif'], cwd=case, capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run([_tool('ElmerSolver'), 'case.sif'], cwd=case, capture_output=True, text=True, timeout=timeout,
+                       env=None if threads is None else {**os.environ, 'OMP_NUM_THREADS': str(threads)})
     (case / 'elmer.log').write_text(p.stdout + p.stderr)
     if p.returncode or 'ALL DONE' not in p.stdout:
         raise RuntimeError('ElmerSolver failed; see ' + str(case / 'elmer.log') + '\n' + (p.stdout + p.stderr)[-1500:])

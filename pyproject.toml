@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kicad2ems-fem"
 dynamic = ["version"]
-description = "kicad2ems's finite-element solvers: the board meshed by gmsh, solved by Palace (S-parameters) or Elmer (DC IR drop)"
+description = "kicad2ems's finite-element solvers: the board meshed by gmsh, solved by Palace (S-parameters, antennas, capacitance) or Elmer (DC IR drop, temperature, coils with ferrite, capacitance)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-or-later"}
@@ -15,6 +15,8 @@ dependencies = [
     "numpy>=1.24",
     "shapely>=2.0",
     "gmsh>=4.11",
+    "scipy>=1.10",                 # the layered mesh, the ring formulas
+    "matplotlib>=3.7",             # thermal.png
 ]
 
 [project.optional-dependencies]
@@ -25,6 +27,10 @@ palace = "kicad2ems_fem.palace.plugin:Palace"
 
 [project.scripts]
 kicad2ems-fem-dc = "kicad2ems_fem.elmer.dc:main"
+kicad2ems-fem-cap = "kicad2ems_fem.palace.cap:main"
+kicad2ems-fem-cap-elmer = "kicad2ems_fem.elmer.cap:main"
+kicad2ems-fem-thermal = "kicad2ems_fem.elmer.thermal:main"
+kicad2ems-fem-mag = "kicad2ems_fem.elmer.mag:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "kicad2ems_fem.__version__"}
