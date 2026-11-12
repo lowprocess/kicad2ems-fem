@@ -7,8 +7,9 @@ whose copper's resistance follows its temperature.
 
 --heat REF=WATTS puts a part's dissipation into the copper under its pads, spread evenly (REF.PAD: under that pad
 only); REF=WATTS@DUTY is a part that dissipates WATTS for that fraction of the time, heated by the mean. --heat-from
-takes every part's dissipation from a circuit run: pcbqs's case.json (its component_power_W, each part's mean
-terminal power in the ngspice transient), or any JSON {REF: watts}; FILE@DUTY for a converter that runs part of the
+takes every part's dissipation from a circuit run: pcbqs's case.json (pcbqs.circuit's parts with their power_W, or
+the bridge tool's component_power_W: each part's mean terminal power in the ngspice transient), or any JSON
+{REF: watts}; FILE@DUTY for a converter that runs part of the
 time. A --heat for the same part replaces the file's figure. The temperature is the steady one for the mean power:
 right when the on and off times are short beside the seconds a part's copper takes to warm. --net, --source and
 --load are dc.py's: the current's own heat is added, and the drops are those of the warm copper. Writes
@@ -186,13 +187,19 @@ def read_vtu(path, name):
 
 
 def circuit_heat(board, path, duty=1.0):
-    """The parts' dissipation from a circuit run, for solve(heat=): ({REF: W}, {name: W left out}). path: pcbqs's
-    case.json (component_power_W) or a JSON {REF: W}. Left out: what is not a part with copper pads on the board
+    """The parts' dissipation from a circuit run, for solve(heat=): ({REF: W}, {name: W left out}). path: a
+    case.json of pcbqs's (pcbqs.circuit's parts, each with its power_W; the bridge tool's component_power_W) or a
+    JSON {REF: W}. Left out: what is not a part with copper pads on the board
     (the copper model's ports, the source, the coil and what lies beyond it) and what dissipates nothing."""
     data = json.loads(Path(path).read_text())
-    data = data.get('component_power_W', data)
+    if isinstance(data, dict) and isinstance(data.get('parts'), dict) and 'component_power_W' not in data:
+        # pcbqs.circuit's case.json: {REF: {type, power_W, ...}} (a source's is negative: what it delivers)
+        data = {ref: p['power_W'] for ref, p in data['parts'].items()
+                if isinstance(p, dict) and isinstance(p.get('power_W'), (int, float))}
+    else:
+        data = data.get('component_power_W', data) if isinstance(data, dict) else data
     if not isinstance(data, dict) or not all(isinstance(v, (int, float)) for v in data.values()):
-        raise ValueError(f'{path}: expected component_power_W, or {{REF: watts}}')
+        raise ValueError(f"{path}: expected a circuit run's case.json (parts, or component_power_W), or {{REF: watts}}")
     if not 0 < duty <= 1:
         raise ValueError('duty: a fraction of the time, above 0 and at most 1')
     refs = {f['ref'] for f in board['prims']['footprints'] if any(p.get('geom') for p in f.get('pads', []))}
@@ -340,7 +347,7 @@ def parser():
     ap = argparse.ArgumentParser(prog='python -m kicad2ems_fem.elmer.thermal', description=__doc__.split('\n\n')[0])
     ap.add_argument('board', help='.kicad_pcb, or a kicad2ems <name>_board.json')
     ap.add_argument('--heat', action='append', help='REF=WATTS or REF.PAD=WATTS; WATTS@DUTY for part of the time (repeat)')
-    ap.add_argument('--heat-from', help="FILE[@DUTY]: pcbqs's case.json (component_power_W) or a JSON {REF: watts}")
+    ap.add_argument('--heat-from', help="FILE[@DUTY]: a pcbqs circuit run's case.json, or a JSON {REF: watts}")
     ap.add_argument('--net', action='append', help='a net that carries current (repeat: joined as one conductor)')
     ap.add_argument('--source', help="the part whose pads on the net are held at 0 V")
     ap.add_argument('--load', action='append', help='REF=AMPS (repeat)')

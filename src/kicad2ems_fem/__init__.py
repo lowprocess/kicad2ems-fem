@@ -7,4 +7,4 @@
 
 Neither program is a Python dependency: each is found at run time (palace/run.py, elmer/run.py).
 """
-__version__ = '0.2.0'
+__version__ = '0.2.1'

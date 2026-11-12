@@ -130,6 +130,15 @@ def test_heat_from_a_circuit_run_keeps_the_parts_on_the_board(tmp_path):
     assert heat == {'Q1': pytest.approx(0.045)} and set(left) == {'C2', 'H1', 'PCB0', 'PRIMARY'}
     (tmp_path / 'flat.json').write_text(json.dumps({'Q1': 0.2, 'C2': 0.1}))
     assert thermal.circuit_heat(b, tmp_path / 'flat.json')[0] == {'Q1': 0.2, 'C2': 0.1}
+    # pcbqs.circuit's case.json: each part a table with its power (the source's negative, a load off the board)
+    (tmp_path / 'general.json').write_text(json.dumps(dict(name='run', period_s=1e-5, parts={
+        'V1': dict(type='source', power_W=-10.7, avg_V=12.0), 'Q1': dict(type='switch', power_W=0.058, rms_A=1.3),
+        'C2': dict(type='capacitor', power_W=0.002), 'R1': dict(type='resistor', power_W=10.0), 'K1': dict(type='coupling')})))
+    heat, left = thermal.circuit_heat(b, tmp_path / 'general.json')
+    assert heat == {'Q1': 0.058, 'C2': 0.002} and left == {'V1': -10.7, 'R1': 10.0}
+    (tmp_path / 'other.json').write_text(json.dumps(dict(parts=['Q1'])))
+    with pytest.raises(ValueError, match="a circuit run's case.json"):
+        thermal.circuit_heat(b, tmp_path / 'other.json')
     with pytest.raises(ValueError):
         thermal.circuit_heat(b, tmp_path / 'flat.json', duty=0.0)
 
