@@ -102,6 +102,10 @@ def test_reports_and_whose_result_a_folder_is(tmp_path, registered):
     rep = A.ElmerDC().report(str(d))
     assert rep['title'] == 'VHB: DC drop from L3' and 'Worst drop 3.400 mV at Q2' in rep['sections'][0]['text']
     assert rep['sections'][1]['table']['rows'] == [['Q1', 0.67, 2.1], ['Q2', 0.67, 3.4]] and '12,345' in rep['footer']
+    # the figures another engine of the rail's copper names alike (kicad2ems.study.compare)
+    assert [(f['name'], f['value'], f['unit']) for f in A.ElmerDC().figures(str(d))] == \
+        [('drop Q1', 2.1, 'mV'), ('drop Q2', 3.4, 'mV'), ('loss', 3.7, 'mW')]
+    assert A.ElmerDC().figures(str(tmp_path)) == [] and A.ElmerThermal().figures(str(tmp_path)) == []
     t = tmp_path / 'th'
     t.mkdir()
     ours = dict(format=1, tool='kicad2ems_fem.elmer.thermal', T_max=71.2, T_min=30.0, ambient=25.0, htc=10.0,
@@ -111,6 +115,8 @@ def test_reports_and_whose_result_a_folder_is(tmp_path, registered):
     assert registry_module.analysis_of(str(t)) == ('elmer_thermal', False)
     rep = A.ElmerThermal().report(str(t))
     assert rep['title'] == 'Temperature: hottest 71.2 °C' and rep['sections'][1]['table']['rows'][0] == ['Q1', 0.3, 70.5, 45.5]
+    assert [(f['name'], f['value']) for f in A.ElmerThermal().figures(str(t))] == \
+        [('hottest', 71.2), ('Q1', 70.5), ('L1', 48.0), ('coolest', 30.0)]
     (t / 'thermal.json').write_text(json.dumps(dict(method='grid', hottest_C=70.0)))       # pcbqs's file: not Elmer's
     assert not A.ElmerThermal().owns(str(t)) and registry_module.analysis_of(str(t)) is None
     c = tmp_path / 'cap'
@@ -121,6 +127,7 @@ def test_reports_and_whose_result_a_folder_is(tmp_path, registered):
     rep = A.PalaceCap().report(str(c))
     assert rep['sections'][0]['table']['columns'] == ['', 'A', 'B'] and rep['sections'][0]['table']['rows'][0] == ['A', 2.0, -1.5]
     assert rep['footer'].startswith('Palace, 500')
+    assert [(f['name'], round(f['value'], 6)) for f in A.PalaceCap().figures(str(c))] == [('C A', 2.0), ('C B', 3.0), ('C A,B', 1.5)]
     assert A.ElmerCap().report(str(tmp_path)) is None
 
 

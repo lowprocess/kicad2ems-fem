@@ -145,6 +145,14 @@ class ElmerDC(_Fem):
         r = self._read(folder)
         return f"worst drop {max(r['drop_mV'].values()):.3f} mV" if r else ''
 
+    def figures(self, folder):
+        """Each load's drop in the net's own copper, and the loss in it."""
+        r = self._read(folder) or {}
+        out = [dict(name=f"drop {ref}", value=float(mv), unit='mV') for ref, mv in (r.get('drop_mV') or {}).items()]
+        if isinstance(r.get('loss_W'), (int, float)):
+            out.append(dict(name='loss', value=r['loss_W'] * 1e3, unit='mW'))
+        return out
+
 
 class ElmerThermal(_Fem):
     name, label, engine = 'elmer_thermal', 'Temperature (Elmer)', 'Elmer'
@@ -183,6 +191,15 @@ class ElmerThermal(_Fem):
                 best = (loss, path)
         return best[1] if best else None
 
+    def figures(self, folder):
+        """The copper's hottest point and the board at each part's pads; the coolest point, which is its own."""
+        r = self._read(folder) or {}
+        if not isinstance(r.get('T_max'), (int, float)):
+            return []
+        return [dict(name='hottest', value=float(r['T_max']), unit='C')] + \
+               [dict(name=ref, value=float(t), unit='C') for ref, t in (r.get('parts') or {}).items()] + \
+               ([dict(name='coolest', value=float(r['T_min']), unit='C')] if isinstance(r.get('T_min'), (int, float)) else [])
+
     def report(self, folder):
         r = self._read(folder)
         if not r:
@@ -212,6 +229,15 @@ class _Cap(_Fem):
         v = values.get('net')
         items = v if isinstance(v, (list, tuple)) else re.split(r'[\n,]', str(v or ''))
         return '-'.join(s.strip() for s in items if str(s).strip())[:40] or 'nets'
+
+    def figures(self, folder):
+        """The Maxwell matrix by name: a net to all the others (its diagonal), and each two nets (minus the entry
+        between them)."""
+        r = self._read(folder) or {}
+        names, C = r.get('names') or [], r.get('C') or []
+        out = [dict(name=f"C {n}", value=C[i][i] * 1e12, unit='pF') for i, n in enumerate(names)]
+        return out + [dict(name=f"C {a},{b}", value=-C[i][j] * 1e12, unit='pF')
+                      for i, a in enumerate(names) for j, b in enumerate(names) if j > i]
 
     def report(self, folder):
         r = self._read(folder)
