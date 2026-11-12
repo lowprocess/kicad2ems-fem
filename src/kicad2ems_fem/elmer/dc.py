@@ -96,14 +96,14 @@ def solve(board, nets, source, loads, out='dc', h=0.25, h_fine=0.05, plating=PLA
     # the power the loads draw through the copper. Not Elmer's Joule heating field: the loop that fills it is not
     # safe with several threads (StatCurrentSolver_post), and now and then gives another figure
     loss = float(sum(-V[ref] * amps for ref, amps in loads.items()))
-    result = dict(format=1, nets=sorted(nets), source=source, loads=dict(loads), V=V,
+    result = dict(format=1, tool='kicad2ems_fem.elmer.dc', nets=sorted(nets), source=source, loads=dict(loads), V=V,
                   drop_mV={r: -v * 1e3 for r, v in V.items()}, loss_W=loss, tets=m['tets'], vias=m['vias'],
                   h=h, h_fine=h_fine, seconds=dict(mesh=round(mesh_s, 1), solve=round(time.perf_counter() - t, 1)))
     (out / 'dc.json').write_text(json.dumps(result, indent=1))
     return result
 
 
-def main(argv=None):
+def parser():
     ap = argparse.ArgumentParser(prog='python -m kicad2ems_fem.elmer.dc', description=__doc__.split('\n\n')[0])
     ap.add_argument('board', help='.kicad_pcb, or a kicad2ems <name>_board.json')
     ap.add_argument('--net', action='append', required=True, help='the net (repeat: nets joined as one conductor)')
@@ -113,6 +113,11 @@ def main(argv=None):
     ap.add_argument('--h', type=float, default=0.25, help='mesh size in the copper, mm (default 0.25)')
     ap.add_argument('--h-fine', type=float, default=0.05, help='mesh size at vias and pad edges, mm (default 0.05)')
     ap.add_argument('--plating', type=float, default=PLATING, help='via plating, mm (default 0.025)')
+    return ap
+
+
+def main(argv=None):
+    ap = parser()
     a = ap.parse_args(argv)
     loads = {}
     for item in a.load:

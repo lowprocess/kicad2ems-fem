@@ -249,7 +249,8 @@ def solve(board, out='thermal', heat=None, nets=None, source=None, loads=None, c
     given = htc * 1e-6 * float(((tf - ambient) * m['face_area']).sum() + ((ts - ambient) * m['side_area']).sum())
     hot = int(np.argmax(T))
     z = m['nodes'][hot, 2]
-    result = dict(format=1, T_max=float(T.max()), T_min=float(T.min()), ambient=ambient, htc=htc,
+    result = dict(format=1, tool='kicad2ems_fem.elmer.thermal', T_max=float(T.max()), T_min=float(T.min()),
+                  ambient=ambient, htc=htc,
                   hottest=dict(x=float(m['nodes'][hot, 0]), y=float(m['nodes'][hot, 1]),
                                layer=min(m['cells'], key=lambda c: abs(0.5 * (c[0] + c[1]) - z))[2]),
                   parts={}, heat=heat, wedges=m['wedges'], triangles=m['triangles'], vias=m['vias'], h=h, hmax=hmax,
@@ -335,7 +336,7 @@ def _pairs(ap, items, flag, what):
     return out
 
 
-def main(argv=None):
+def parser():
     ap = argparse.ArgumentParser(prog='python -m kicad2ems_fem.elmer.thermal', description=__doc__.split('\n\n')[0])
     ap.add_argument('board', help='.kicad_pcb, or a kicad2ems <name>_board.json')
     ap.add_argument('--heat', action='append', help='REF=WATTS or REF.PAD=WATTS; WATTS@DUTY for part of the time (repeat)')
@@ -352,6 +353,11 @@ def main(argv=None):
     ap.add_argument('--h', type=float, default=0.3, help='mesh size in the copper with current and at pads, mm (default 0.3)')
     ap.add_argument('--hmax', type=float, default=2.0, help='mesh size elsewhere, mm (default 2)')
     ap.add_argument('--plating', type=float, default=PLATING, help='via plating, mm (default 0.025)')
+    return ap
+
+
+def main(argv=None):
+    ap = parser()
     a = ap.parse_args(argv)
     heat, loads = _pairs(ap, a.heat, '--heat', 'WATTS'), _pairs(ap, a.load, '--load', 'AMPS')
     say = lambda s: print('fem thermal:', s, flush=True)

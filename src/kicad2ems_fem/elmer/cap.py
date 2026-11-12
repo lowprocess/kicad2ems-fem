@@ -102,15 +102,15 @@ def solve(board, nets, out, thick=False, h=None, hmax=None, margin=None, crop=No
     C = maxwell(np.loadtxt(os.path.join(case, 'capacitance.dat'), ndmin=2))
     if C.shape != (n, n):
         raise RuntimeError(f"Elmer's capacitance matrix is {C.shape}, expected {n} x {n}")
-    r = dict(names=[name for name, _ in m['terminals']], C=C.tolist(), thick=bool(thick), far=far, order=order,
-             solver='elmer', tets=m['tets'], h=m['h'], hmax=m['hmax'], margin=m['margin'], mesh_s=round(mesh_s, 1),
+    r = dict(tool='kicad2ems_fem.elmer.cap', names=[name for name, _ in m['terminals']], C=C.tolist(), thick=bool(thick),
+             far=far, order=order, solver='elmer', tets=m['tets'], h=m['h'], hmax=m['hmax'], margin=m['margin'], mesh_s=round(mesh_s, 1),
              seconds=round(time.time() - t, 1))
     with open(os.path.join(str(out), 'cap.json'), 'w') as fh:
         json.dump(r, fh, indent=1)
     return r
 
 
-def main(argv=None):
+def parser():
     import argparse
     ap = argparse.ArgumentParser(prog='python -m kicad2ems_fem.elmer.cap', description=__doc__.split('\n\n')[0])
     ap.add_argument('board', help='a .kicad_pcb, or a kicad2ems <name>_board.json')
@@ -123,7 +123,11 @@ def main(argv=None):
     ap.add_argument('--region', help='x0,y0,x1,y1 (mm, model coordinates): only the board inside it')
     ap.add_argument('--far', choices=('open', 'ground'), default='open', help="the air box's faces (default open)")
     ap.add_argument('--order', type=int, default=2, help="the element order (default 2)")
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None):
+    a = parser().parse_args(argv)
     crop = box(*[float(v) for v in a.region.split(',')]) if a.region else None
     r = solve(a.board, a.net, a.out, thick=a.thick, h=a.h, hmax=a.hmax, margin=a.margin, crop=crop, order=a.order,
               far=a.far)

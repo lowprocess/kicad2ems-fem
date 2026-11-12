@@ -256,7 +256,8 @@ def solve(board, nets, out, thick=False, h=None, hmax=None, margin=None, crop=No
     n = len(m['terminals'])
     post = os.path.join(work, 'postpro')
     C, Cm = read_c(post, n), read_c(post, n, 'terminal-Cm.csv')
-    r = dict(names=[name for name, _ in m['terminals']], C=C.tolist(), Cm=Cm.tolist(), thick=bool(thick), far=far,
+    r = dict(tool='kicad2ems_fem.palace.cap', names=[name for name, _ in m['terminals']], C=C.tolist(), Cm=Cm.tolist(),
+             thick=bool(thick), far=far,
              order=order, tets=m['tets'], h=m['h'], hmax=m['hmax'], margin=m['margin'], mesh_s=round(mesh_s, 1),
              seconds=round(time.time() - t, 1))
     with open(os.path.join(str(out), 'cap.json'), 'w') as fh:
@@ -273,7 +274,7 @@ def report(r):
     return '\n'.join(lines)
 
 
-def main(argv=None):
+def parser():
     import argparse
     ap = argparse.ArgumentParser(prog='kicad2ems-fem-cap', description=__doc__.split('\n\n')[0])
     ap.add_argument('board', help='a .kicad_pcb, or a kicad2ems <name>_board.json')
@@ -287,7 +288,11 @@ def main(argv=None):
     ap.add_argument('--far', choices=('open', 'ground'), default='open', help="the air box's faces (default open)")
     ap.add_argument('--order', type=int, default=2, help="Palace's element order (default 2)")
     ap.add_argument('--np', type=int, default=8, help="Palace's MPI processes (default 8)")
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None):
+    a = parser().parse_args(argv)
     crop = box(*[float(v) for v in a.region.split(',')]) if a.region else None
     r = solve(a.board, a.net, a.out, thick=a.thick, h=a.h, hmax=a.hmax, margin=a.margin, crop=crop, order=a.order,
               far=a.far, np_=a.np)
