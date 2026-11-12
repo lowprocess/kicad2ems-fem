@@ -65,8 +65,10 @@ Against pcbqs's 2D DC solve this agreed within 0.2% on the wpthb VHB rail and 1.
 (pcbqs/validation). wpthb VHB, L3 to the two high-side FETs, at h 0.1 / 0.02 mm (1.1 M tetrahedra): Q1 0.3835 mV,
 Q2 0.6179 mV.
 
-Elmer is found as `K2E_ELMER` (the folder with `ElmerSolver` and `ElmerGrid`) or on `PATH`; a serial build
-with OpenMP is enough for every tool here. The mesh is solved with Elmer's direct solver (Umfpack), because the
+Elmer is found as `K2E_ELMER` (the folder with `ElmerSolver` and `ElmerGrid`), the folder kicad2ems's installer
+recorded (`elmer` in `kicad2ems-site.toml`), or on `PATH`; a serial build with OpenMP is enough for every tool
+here. kicad2ems's `install.py` finds one, takes a folder you give (`--elmer PATH`) or builds one from source
+(`--elmer build`, kicad2ems's `tools/build_elmer.sh`: a few minutes). The mesh is solved with Elmer's direct solver (Umfpack), because the
 iterative ones diverged on thin copper. A million tetrahedra take about 3.5 GB.
 
 ## Palace: S-parameters
@@ -153,12 +155,19 @@ is first order.
 
 Palace is not on PyPI. `run.py` finds it as
 
-- `K2E_PALACE`: its `palace` executable (the MPI wrapper), or `palace` on `PATH`, e.g. a
-  [Spack build](https://awslabs.github.io/palace/stable/install/) (`spack install palace`);
-- `K2E_PALACE_ROOTFS` (default `~/opt/palace/rootfs`): an unpacked Palace container image, run with rootless
+- `K2E_PALACE`: its `palace` executable (the MPI wrapper), then the one kicad2ems's installer recorded (`palace`
+  in `kicad2ems-site.toml`), then `palace` on `PATH`. It runs with its own folder first on `PATH`, where a Spack
+  view has its `mpirun`. kicad2ems's `install.py --palace spack` (`tools/build_palace.sh`) builds Palace's newest
+  release with Spack as Palace's own CI does, into a prefix of its own: several hours and about 10 GB, never by
+  default;
+- `K2E_PALACE_ROOTFS`, then `palace_rootfs` in `kicad2ems-site.toml` (default `~/opt/palace/rootfs`): an unpacked
+  Palace container image, run with rootless
   podman with that directory as its root, no network, as the user. The development machine uses a community
   Apptainer image of Palace 0.18.1 (gds2palace's `palace_0181`) unpacked this way, since there is no root
   for Apptainer.
+
+The tools here were run against Palace 0.18.1. The Spack build is of the newest release (0.19.0 at the time of
+writing), which has not been run against them yet; `PALACE_TAG=v0.18.1` builds the one they were.
 
 ### Settings
 

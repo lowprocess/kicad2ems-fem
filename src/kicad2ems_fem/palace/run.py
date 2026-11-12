@@ -8,10 +8,13 @@ Running Palace and reading its S-parameters.
     f, th, ph, E = read_farfield(workdir + '/postpro')    # the far field r E at the config's angles
 
 Palace is found as
-  K2E_PALACE          a `palace` executable (its MPI wrapper), or `palace` on PATH: run directly
+  K2E_PALACE          a `palace` executable (its MPI wrapper), or `palace` on PATH: run directly, with its own
+                      folder first on PATH (a Spack view's: its mpirun beside it)
   K2E_PALACE_ROOTFS   an unpacked Palace image (a root filesystem with Palace's Spack view in /opt/views/view):
                       run in rootless podman with that as its root, no network, as the user; default
                       ~/opt/palace/rootfs
+  each also as kicad2ems's installer recorded it (kicad2ems-site.toml: palace, palace_rootfs), after the
+  environment's and before PATH's
 """
 import os
 import shutil
@@ -24,11 +27,16 @@ ROOTFS = os.path.expanduser('~/opt/palace/rootfs')
 VIEW_ENV = '/.singularity.d/env/91-environment.sh'       # the image's PATH to its Spack view
 
 
+def _site(key):
+    from ..elmer.run import site
+    return site(key)
+
+
 def launcher():
-    exe = os.environ.get('K2E_PALACE') or shutil.which('palace')
+    exe = os.environ.get('K2E_PALACE') or _site('palace') or shutil.which('palace')
     if exe:
         return 'native', exe
-    root = os.environ.get('K2E_PALACE_ROOTFS', ROOTFS)
+    root = os.environ.get('K2E_PALACE_ROOTFS') or _site('palace_rootfs') or ROOTFS
     if os.path.isdir(os.path.join(root, 'opt/views/view/bin')) and shutil.which('podman'):
         return 'podman', root
     return None
@@ -49,10 +57,20 @@ def command(workdir, cfg, np=8, threads=1, how=None):
             '-v', f'{os.path.abspath(workdir)}:/work:Z', '--rootfs', f'{where}:O', 'bash', '-c', env], None
 
 
+def environment(cmd):
+    """The environment a Palace command runs in: a native palace's own folder first on PATH (a Spack view's,
+    where its mpirun is too: the launcher finds MPI on PATH)."""
+    env = dict(os.environ)
+    if cmd and cmd[0] != 'podman':
+        env['PATH'] = os.pathsep.join(filter(None, (os.path.dirname(os.path.abspath(cmd[0])), env.get('PATH'))))
+    return env
+
+
 def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None, logfile='palace.log'):
     cmd, cwd = command(workdir, cfg, np, threads, how)
     with open(os.path.join(workdir, logfile), 'w') as fh:
-        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                             env=environment(cmd))
         tail, shown = [], 0.0
         for line in p.stdout:
             fh.write(line)

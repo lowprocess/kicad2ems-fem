@@ -6,7 +6,8 @@
                                              # (threads=1: for a .sif whose solvers are not thread safe)
     scalars(path)                            # {column name: value} of a SaveScalars file
 
-Elmer is found as K2E_ELMER (the folder with ElmerSolver and ElmerGrid) or on PATH.
+Elmer is found as K2E_ELMER (the folder with ElmerSolver and ElmerGrid), the folder kicad2ems's installer
+recorded (kicad2ems-site.toml: elmer), or on PATH.
 """
 import os
 import re
@@ -17,10 +18,21 @@ from pathlib import Path
 import numpy as np
 
 
+def site(key):
+    """A setting kicad2ems's installer recorded (kicad2ems.sitecfg: kicad2ems-site.toml), or None."""
+    try:
+        from kicad2ems import sitecfg
+        return sitecfg.get(key)
+    except Exception:                                               # an older kicad2ems, a file that does not read
+        return None
+
+
 def _tool(name):
-    where = os.environ.get('K2E_ELMER')
+    """An Elmer program: in K2E_ELMER, else in the folder the installer recorded (sitecfg 'elmer'), else on PATH."""
+    where = os.environ.get('K2E_ELMER') or site('elmer')
+    exe = name + ('.exe' if os.name == 'nt' else '')
     if where:
-        path = Path(where) / name
+        path = Path(where) / exe
         return str(path) if path.is_file() else None
     return shutil.which(name)
 
