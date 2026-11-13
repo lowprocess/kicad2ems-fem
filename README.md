@@ -40,7 +40,7 @@ kicad2ems lists what can be asked of a board as questions, each with the engines
 | capacitance between nets | `elmer_cap`, `palace_cap` | |
 
 A front end builds each one's settings from the tool's own command-line options, runs it as its command and shows
-its report. Asked for the temperature without any heat typed, `elmer_thermal` takes the losses of the latest
+its report. The nets and the source part can be picked on the board there (the options' `pick`, kicad2ems API 2.11). Asked for the temperature without any heat typed, `elmer_thermal` takes the losses of the latest
 circuit run's heaviest case. Each result says which tool wrote it, so a `thermal.json` of Elmer's is not taken for
 pcbqs's.
 

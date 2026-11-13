@@ -58,6 +58,10 @@ def test_the_settings_are_the_tools_own_options():
                                                                     key=A.ORDER.index)
     cap = {o['key']: o for o in A.PalaceCap().options()}
     assert cap['thick']['kind'] == 'bool' and cap['far']['choices'] == ['open', 'ground'] and cap['np']['kind'] == 'int'
+    # what names a net or a part says so, for a front end to pick it on the board (kicad2ems API 2.11)
+    assert dc['net']['pick'] == 'nets' and dc['source']['pick'] == 'part' and 'pick' not in dc['load']
+    assert th['copper']['pick'] == 'nets' and cap['net']['pick'] == 'nets'
+    assert not any('pick' in o for o in A.ElmerMag().options())     # no board: nothing to pick on
 
 
 def test_the_commands(tmp_path):

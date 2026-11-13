@@ -28,6 +28,9 @@ GROUPS = dict(coil='Coils and plates', plate='Coils and plates',
               h='Mesh', h_fine='Mesh', hmax='Mesh', plating='Mesh', thick='Mesh', order='Solver', np='Solver')
 
 
+PICK = dict(net='nets', copper='nets', source='part')       # settings a front end may pick on the board (API 2.11)
+
+
 def describe(parser):
     """A tool's options as kicad2ems's analyses take them, [dict(key, flag, kind, default, help, group, choices,
     required)], from its argparse parser: every option but the board and the output folder, which a front end
@@ -43,6 +46,8 @@ def describe(parser):
                                  '' if a.default is None else a.default),
                         help=a.help or '', group=GROUPS.get(a.dest, 'Solver'), choices=list(a.choices or ()),
                         required=bool(a.required)))
+        if a.dest in PICK:
+            out[-1]['pick'] = PICK[a.dest]
     return sorted(out, key=lambda o: ORDER.index(o['group']))
 
 
