@@ -19,6 +19,7 @@ nearby (a shield or a battery behind the ferrite carries eddy currents: not in a
 board copper (pcbqs has those in air).
 """
 import argparse
+import re
 import json
 import sys
 import time
@@ -328,7 +329,8 @@ def solve(coils, plates=(), out='mag', h=None, margin=6.0, log=print):
         for j in range(i):
             L[i, j] = L[j, i] = energy([float(q in (i, j)) for q in range(n)]) - 0.5 * (L[i, i] + L[j, j])
     d = np.sqrt(np.diag(L))
-    result = dict(format=1, names=[c['name'] for c in coils], L=L.tolist(), k=(L / np.outer(d, d)).tolist(),
+    result = dict(format=1, tool='kicad2ems_fem.elmer.mag', names=[c['name'] for c in coils], L=L.tolist(),
+                  k=(L / np.outer(d, d)).tolist(),
                   air=air_core(coils).tolist(), coils=coils, plates=plates, tets=m['tets'], margin=margin,
                   radius=m['radius'], sizes=m['sizes'],
                   seconds=dict(mesh=round(mesh_s, 1), solve=round(time.perf_counter() - t, 1)))
@@ -339,8 +341,8 @@ def solve(coils, plates=(), out='mag', h=None, margin=6.0, log=print):
 def _item(ap, text, flag):
     """'name:key=value,...' as a dict; size=AxB as a pair."""
     name, sep, rest = text.partition(':')
-    out = dict(name=name) if sep else {}
-    for part in (rest if sep else text).split(','):
+    out = dict(name=name.strip()) if sep else {}
+    for part in re.split(r'[,\s]+', (rest if sep else text).strip()):     # commas or spaces between them
         key, _, v = part.partition('=')
         try:
             out[key.strip()] = tuple(float(q) for q in v.split('x')) if key.strip() == 'size' else float(v)
@@ -351,14 +353,21 @@ def _item(ap, text, flag):
     return out
 
 
-def main(argv=None):
+def parser():
     ap = argparse.ArgumentParser(prog='python -m kicad2ems_fem.elmer.mag', description=__doc__.split('\n\n')[0])
     ap.add_argument('--coil', action='append', required=True,
-                    help='[NAME:]turns=N,inner=R,outer=R,z=Z,t=T[,x=X,y=Y] (mm; repeat)')
-    ap.add_argument('--plate', action='append', help='z=Z,t=T,mur=MU,size=AxB or r=R[,x=X,y=Y] (mm; repeat)')
+                    help='[NAME:] turns=N inner=R outer=R z=Z t=T [x=X y=Y] (mm, spaces or commas between; '
+                         'repeat: a coil each)')
+    ap.add_argument('--plate', action='append', help='z=Z t=T mur=MU size=AxB or r=R [x=X y=Y] (mm; repeat: a '
+                                                     'ferrite plate each)')
     ap.add_argument('--out', default='mag', help='output folder')
     ap.add_argument('--h', type=float, help='mesh size at the coils and plates, mm (default: from their sections)')
     ap.add_argument('--margin', type=float, default=6.0, help="the air ball's radius over the parts' reach (default 6)")
+    return ap
+
+
+def main(argv=None):
+    ap = parser()
     a = ap.parse_args(argv)
     say = lambda s: print('fem mag:', s, flush=True)
     try:

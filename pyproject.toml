@@ -30,6 +30,7 @@ elmer_dc = "kicad2ems_fem.analyses:ElmerDC"
 elmer_thermal = "kicad2ems_fem.analyses:ElmerThermal"
 elmer_cap = "kicad2ems_fem.analyses:ElmerCap"
 palace_cap = "kicad2ems_fem.analyses:PalaceCap"
+elmer_mag = "kicad2ems_fem.analyses:ElmerMag"
 
 [project.scripts]
 kicad2ems-fem-dc = "kicad2ems_fem.elmer.dc:main"

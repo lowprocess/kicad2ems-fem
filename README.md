@@ -10,7 +10,7 @@ gmsh meshing. Neither program is a Python dependency; each is found when it runs
 | Palace, electrostatic | Capacitance between nets on the real stack | `python -m kicad2ems_fem.palace.cap` (`palace/cap.py`) |
 | [Elmer](https://www.elmerfem.org) (CSC) | DC IR drop of a net's copper, 3D | `python -m kicad2ems_fem.elmer.dc` (`elmer/`) |
 | Elmer, heat | The board's steady temperature: parts' heat, a rail's own, a circuit run's | `python -m kicad2ems_fem.elmer.thermal` |
-| Elmer, magnetostatic | Wound coils beside ferrite: inductance and coupling | `python -m kicad2ems_fem.elmer.mag` |
+| Elmer, magnetostatic | Wound coils beside ferrite: inductance and coupling (the study's *Coils and ferrite*) | `python -m kicad2ems_fem.elmer.mag` |
 | Elmer, electrostatic | Capacitance between nets: Palace's model, a second solver | `python -m kicad2ems_fem.elmer.cap` |
 
 All are **experimental**. Each is a second opinion on a faster solver of the tool, by a different method:
@@ -166,8 +166,11 @@ Palace is not on PyPI. `run.py` finds it as
   Apptainer image of Palace 0.18.1 (gds2palace's `palace_0181`) unpacked this way, since there is no root
   for Apptainer.
 
-The tools here were run against Palace 0.18.1. The Spack build is of the newest release (0.19.0 at the time of
-writing), which has not been run against them yet; `PALACE_TAG=v0.18.1` builds the one they were.
+The tools here were written against Palace 0.18.1. The Spack build is of the newest release, and 0.19.0 built
+that way (72 packages, about an hour at 8 jobs, 2.3 GB) runs them too: kicad2ems's `rf_crosstalk` through the
+plugin gives the crosstalk of mom25d with lumped ports and of the line model (NEXT -31.0 dB at 1 GHz, FEXT
+-17.2 dB at 6 GHz; mom25d -31.7 and -17.5 dB), 103,000 tetrahedra in 6 minutes. `PALACE_TAG=v0.18.1` builds the
+older one.
 
 ### Settings
 
@@ -241,6 +244,14 @@ python -m kicad2ems_fem.elmer.mag --coil tx:turns=10,inner=10.25,outer=22,z=0,t=
 - **Output:** `<out>/mag.json`: `L` (H, the matrix), `k`, and `air`: the same coils without ferrite by the ring
   formulas (Maxwell's for coaxial circles, Neumann's integral off axis), to read the result against.
 - **Mesh:** `--h` at the coils and plates (default from their sections).
+
+**In a study.** The tool is also the engine of the question *Coils and ferrite* (`elmer_mag`), which needs no
+board: in kicad2ems's window, tick it under *Power*, describe each coil and each plate on a line of its own
+(`tx: turns=10 inner=10.25 outer=22 z=0 t=1`; spaces or commas between), and run. Its report has the
+inductances, the coupling and the same coils in air, and its result offers *Use these coils in the circuit*: the
+primary's and the secondary's inductance and their coupling, into the full bridge's settings
+(`pcbqs.power_circuit --primary-l --secondary-l --coupling`), so a wireless-power bridge's run uses the coils as
+solved, not a datasheet's figure. In a config: `[analysis.elmer_mag] coil = ["tx: turns=10 ...", "rx: ..."]`.
 
 Left out: the winding's resistance and its skin and proximity loss, the ferrite's loss and saturation, metal
 nearby (a shield or a battery behind the ferrite carries eddy currents; this is a static field), and coils drawn

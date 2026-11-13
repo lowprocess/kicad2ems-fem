@@ -13,7 +13,7 @@ from kicad2ems import analyses as registry_module, study
 from kicad2ems_fem import analyses as A
 from kicad2ems_fem.elmer import run as elmer
 
-ALL = (A.ElmerDC, A.ElmerThermal, A.ElmerCap, A.PalaceCap)
+ALL = (A.ElmerDC, A.ElmerThermal, A.ElmerCap, A.PalaceCap, A.ElmerMag)
 
 
 class _EP:
@@ -34,10 +34,11 @@ def registered(monkeypatch):
 
 
 def test_they_register_as_engines_of_questions_others_answer_too(registered):
-    assert list(registered) == ['elmer_dc', 'elmer_thermal', 'elmer_cap', 'palace_cap'] and not registry_module.broken
+    assert list(registered) == ['elmer_dc', 'elmer_mag', 'elmer_thermal', 'elmer_cap', 'palace_cap']
+    assert not registry_module.broken
     es = study.engines()
-    assert [es[n].provides for n in registered] == [('dc',), ('thermal',), ('capacitance',), ('capacitance',)]
-    assert [es[n].label for n in registered] == ['Elmer', 'Elmer', 'Elmer', 'Palace']
+    assert [es[n].provides for n in registered] == [('dc',), ('coils',), ('thermal',), ('capacitance',), ('capacitance',)]
+    assert [es[n].label for n in registered] == ['Elmer', 'Elmer', 'Elmer', 'Elmer', 'Palace']
     rows = {r['question'].name: r for g in study.study_tree() for r in g['questions']}
     assert [e.name for e in rows['capacitance']['engines']] == ['elmer_cap', 'palace_cap']
     import tomllib
@@ -154,3 +155,43 @@ def test_a_drop_run_through_its_command(tmp_path, registered):
     rep = a.report(str(out))
     drop = rep['sections'][1]['table']['rows'][0][2]
     assert drop == pytest.approx(1.0 * 18.0e-3 / (5.8e7 * 35e-6 * 5e-3) * 1e3, rel=0.03)       # 18 mm between the pads
+
+
+def test_coils_with_ferrite_are_a_question_of_their_own_with_no_board(tmp_path, registered):
+    """elmer_mag: its coils and plates one a line (an item has spaces or commas of its own), a command without a
+    board, its report, and the coil model it proposes to the circuit."""
+    a = registered['elmer_mag']
+    rows = {r['question'].name: r for g in study.study_tree() for r in g['questions']}
+    assert [e.name for e in rows['coils']['engines']] == ['elmer_mag'] and rows['coils']['question'].group == 'Power'
+    opts = {o['key']: o for o in a.options()}
+    assert opts['coil']['kind'] == 'list' and opts['coil']['level'] == 'basic' and opts['coil']['group'] == 'Coils and plates'
+    with pytest.raises(ValueError, match='describe a coil'):
+        a.command({}, None, str(tmp_path))
+    cmd = a.command(dict(coil='tx: turns=10 inner=10.25 outer=22 z=0 t=1\nrx:turns=14,inner=8,outer=16,z=5,t=0.5',
+                         plate=['z=-3 t=2.5 size=50x50 mur=2000'], margin=6.0, h='0.8'), None, str(tmp_path))
+    assert cmd[1:5] == ['-m', 'kicad2ems_fem.elmer.mag', '--out', str(tmp_path)]
+    assert cmd.count('--coil') == 2 and cmd[cmd.index('--plate') + 1] == 'z=-3 t=2.5 size=50x50 mur=2000'
+    assert cmd[cmd.index('--h') + 1] == '0.8' and '--margin' not in cmd          # (its default)
+    assert a.tag(dict(coil=['tx: turns=1', 'turns=2'])) == 'tx_coil2'
+    from kicad2ems_fem.elmer import mag
+    p = mag.parser()
+    assert mag._item(p, 'tx: turns=10 inner=10.25, outer=22 z=0 t=1', '--coil') == dict(
+        name='tx', turns=10.0, inner=10.25, outer=22.0, z=0.0, t=1.0)
+    assert mag._item(p, 'z=-3,t=2.5,size=50x50,mur=2000', '--plate')['size'] == (50.0, 50.0)
+    assert a.report(str(tmp_path)) is None and a.suggest(str(tmp_path)) == []
+    r = dict(format=1, tool='kicad2ems_fem.elmer.mag', names=['tx', 'rx'], L=[[6.45e-6, 3.75e-6], [3.75e-6, 6.80e-6]],
+             k=[[1.0, 0.567], [0.567, 1.0]], air=[[3.74e-6, 2.2e-6], [2.2e-6, 5.77e-6]],
+             coils=[dict(name='tx', turns=10), dict(name='rx', turns=14)],
+             plates=[dict(z=-3, t=2.5, size=[50, 50], mur=2000)], tets=77000, seconds=dict(mesh=3, solve=71))
+    (tmp_path / 'mag.json').write_text(json.dumps(r))
+    assert a.owns(str(tmp_path))
+    rep = a.report(str(tmp_path))
+    assert rep['summary'] == 'tx 6.45 uH, rx 6.8 uH; k 0.567 (tx to rx)'
+    assert [s['title'] for s in rep['sections']] == ['Inductances', 'Coupling', 'Ferrite plates']
+    assert rep['sections'][0]['table']['rows'][0][:3] == ['tx', 10, pytest.approx(6.45)]
+    figs = {f['name']: f['value'] for f in a.figures(str(tmp_path))}
+    assert figs['L tx'] == pytest.approx(6.45) and figs['k tx,rx'] == pytest.approx(0.567)
+    s, = a.suggest(str(tmp_path))
+    assert s['to'] == 'circuit' and s['values'] == dict(primary_l=6.45, secondary_l=6.8, coupling=0.567)
+    (tmp_path / 'mag.json').write_text(json.dumps(dict(r, names=['tx'], L=[[6.45e-6]], k=[[1.0]], air=[[3.74e-6]])))
+    assert a.suggest(str(tmp_path)) == [] and 'k ' not in a.report(str(tmp_path))['summary']     # one coil: no pair

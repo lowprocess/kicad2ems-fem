@@ -7,6 +7,7 @@ and lay the answers side by side.
     elmer_thermal   the board's temperature          (python -m kicad2ems_fem.elmer.thermal)
     elmer_cap       the capacitance between nets     (python -m kicad2ems_fem.elmer.cap)
     palace_cap      the same, by Palace              (python -m kicad2ems_fem.palace.cap)
+    elmer_mag       wound coils beside ferrite       (python -m kicad2ems_fem.elmer.mag): its own question, no board
 
 Each one's settings are its command line's options, read from the tool's own parser, so a new option of a tool
 appears in a front end without a change here. Only this module imports kicad2ems.api.analysis.
@@ -19,8 +20,9 @@ import sys
 from kicad2ems.api.analysis import Analysis
 
 API = (2, 6)
-ORDER = ('Nets and loads', 'Heat', 'Air and board', 'Mesh', 'Solver')
-GROUPS = dict(net='Nets and loads', source='Nets and loads', load='Nets and loads', copper='Nets and loads',
+ORDER = ('Coils and plates', 'Nets and loads', 'Heat', 'Air and board', 'Mesh', 'Solver')
+GROUPS = dict(coil='Coils and plates', plate='Coils and plates',
+              net='Nets and loads', source='Nets and loads', load='Nets and loads', copper='Nets and loads',
               heat='Heat', heat_from='Heat', htc='Air and board', ambient='Air and board', k_board='Air and board',
               far='Air and board', margin='Air and board', region='Air and board',
               h='Mesh', h_fine='Mesh', hmax='Mesh', plating='Mesh', thick='Mesh', order='Solver', np='Solver')
@@ -268,3 +270,105 @@ class PalaceCap(_Cap):
     tool = module = 'kicad2ems_fem.palace.cap'
     about = "the capacitance matrix of nets' copper in the board's dielectrics, by Palace's electrostatics"
     order = 61
+
+
+class ElmerMag(_Fem):
+    """Wound coils beside ferrite plates: their inductances and coupling (elmer/mag.py). The coils are parts, not
+    board copper: a run needs no board, and its result proposes the coil model of pcbqs's full bridge (the coils'
+    inductances and their coupling) to the circuit."""
+    name, label, engine = 'elmer_mag', 'Coils with ferrite (Elmer)', 'Elmer'
+    tool = module = 'kicad2ems_fem.elmer.mag'
+    about = "wound coils beside ferrite plates: their inductances and coupling, for a wireless-power circuit"
+    order, result, provides = 45, 'mag.json', ('coils',)
+
+    def options(self):
+        opts = super().options()
+        for o in opts:
+            if o['key'] in ('coil', 'plate'):
+                o['level'] = 'basic'
+        return opts
+
+    def tag(self, values):
+        coils = self._items(values.get('coil'))
+        names = [str(c).split(':')[0].strip() if ':' in str(c) else f"coil{k + 1}" for k, c in enumerate(coils)]
+        return '_'.join(re.sub(r'[^A-Za-z0-9]+', '-', n) for n in names[:3]) or 'coils'
+
+    @staticmethod
+    def _items(v):
+        """A repeatable setting's items, one a line (an item has commas or spaces of its own)."""
+        v = v if isinstance(v, (list, tuple)) else str(v or '').split('\n')
+        return [str(x).strip() for x in v if str(x).strip()]
+
+    def command(self, values, board, out, preview=False, results=None):
+        coils = self._items(values.get('coil'))
+        if not coils:
+            raise ValueError("describe a coil, one a line: NAME: turns=N inner=R outer=R z=Z t=T (mm)")
+        cmd = [sys.executable, '-m', self.module, '--out', str(out)]        # (no board: the coils are parts)
+        for c in coils:
+            cmd += ['--coil', c]
+        for p in self._items(values.get('plate')):
+            cmd += ['--plate', p]
+        for o in self.options():
+            v = str(values.get(o['key']) if values.get(o['key']) is not None else '').strip()
+            if o['key'] in ('h', 'margin') and v and v != str(o['default']):
+                cmd += [o['flag'], v]
+        return cmd
+
+    def figures(self, folder):
+        r = self._read(folder)
+        if not r or r.get('tool') != self.module:
+            return []
+        n = r['names']
+        out = [dict(name=f"L {a}", value=r['L'][i][i] * 1e6, unit='uH') for i, a in enumerate(n)]
+        return out + [dict(name=f"k {n[j]},{n[i]}", value=r['k'][i][j], unit='') for i in range(len(n))
+                      for j in range(i)]
+
+    def report(self, folder):
+        r = self._read(folder)
+        if not r or r.get('tool') != self.module:
+            return None
+        n, L, air = r['names'], r['L'], r['air']
+        coils = {c['name']: c for c in r.get('coils', [])}
+        sec = [dict(title='Inductances',
+                    text="Each coil's own inductance beside the ferrite, and without it by the ring formulas "
+                         "(Maxwell's for coaxial circles, Neumann's integral off axis).",
+                    table=dict(columns=['coil', 'turns', 'L (uH)', 'in air (uH)', 'with the ferrite'],
+                               rows=[[a, coils.get(a, {}).get('turns', ''), L[i][i] * 1e6, air[i][i] * 1e6,
+                                      f"x {L[i][i] / air[i][i]:.2f}"] for i, a in enumerate(n)],
+                               formats=[None, '.0f', '.3f', '.3f', None]))]
+        pairs = [(i, j) for i in range(len(n)) for j in range(i)]
+        if pairs:
+            ka = lambda i, j: air[i][j] / (air[i][i] * air[j][j]) ** 0.5
+            sec.append(dict(title='Coupling',
+                            table=dict(columns=['coils', 'M (uH)', 'k', 'k in air'],
+                                       rows=[[f"{n[j]} to {n[i]}", L[i][j] * 1e6, r['k'][i][j], ka(i, j)] for i, j in pairs],
+                                       formats=[None, '.3f', '.4f', '.4f'])))
+        if r.get('plates'):
+            sec.append(dict(title='Ferrite plates',
+                            table=dict(columns=['z (mm)', 'thickness (mm)', 'mu_r', 'size (mm)'],
+                                       rows=[[p.get('z', 0.0), p.get('t', 0.0), p.get('mur', 1.0),
+                                              f"r {p['r']:g}" if 'r' in p else 'x'.join(f"{v:g}" for v in p.get('size', ()))]
+                                             for p in r['plates']], formats=['.2f', '.2f', '.0f', None])))
+        head = ', '.join(f"{a} {L[i][i] * 1e6:.3g} uH" for i, a in enumerate(n))
+        if pairs:
+            i, j = pairs[0]
+            head += f"; k {r['k'][i][j]:.3f} ({n[j]} to {n[i]})"
+        return dict(title=f"Coils with ferrite: {', '.join(n)}", summary=head, sections=sec,
+                    notes=["Static field: no winding resistance, skin or proximity loss, no ferrite loss or "
+                           "saturation, no eddy currents in metal nearby."],
+                    footer=f"Elmer, {r.get('tets', 0):,} tetrahedra, {_seconds(r):.0f} s")
+
+    def suggest(self, folder):
+        """The first two coils as the full bridge's coil model: the primary's and the secondary's inductance and
+        their coupling."""
+        r = self._read(folder)
+        if not r or r.get('tool') != self.module or len(r['names']) < 2:
+            return []
+        n, L = r['names'], r['L']
+        vals = dict(primary_l=round(L[0][0] * 1e6, 4), secondary_l=round(L[1][1] * 1e6, 4),
+                    coupling=round(abs(r['k'][1][0]), 4))
+        return [dict(to='circuit', label=f"Use these coils in the circuit ({n[0]} {vals['primary_l']:.3g} uH, "
+                                         f"{n[1]} {vals['secondary_l']:.3g} uH, k {vals['coupling']:.3f})",
+                     values=vals, need=[],
+                     note="the full bridge's coil model (pcbqs.power_circuit): its primary and secondary "
+                          "inductance and their coupling")]
