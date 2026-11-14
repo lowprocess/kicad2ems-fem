@@ -30,7 +30,7 @@ The last two have no fast solver in the tool: they supply what it otherwise take
 ## As engines of a kicad2ems study
 
 kicad2ems lists what can be asked of a board as questions, each with the engines that answer it
-(`kicad2ems.study`, `kicad2ems --check`). Four of the tools here register as engines (`analyses.py`, the
+(`kicad2ems.study`, `kicad2ems --check`). Five of the tools here register as engines (`analyses.py`, the
 `kicad2ems.analyses` entry points), beside the faster ones:
 
 | Question | Engine here | Beside |
@@ -38,6 +38,7 @@ kicad2ems lists what can be asked of a board as questions, each with the engines
 | a rail's DC drop | `elmer_dc` | pcbqs.pdn |
 | the board's temperature | `elmer_thermal` | pcbqs.thermal |
 | capacitance between nets | `elmer_cap`, `palace_cap` | |
+| coils and ferrite (their inductances and coupling) | `elmer_mag` | |
 
 A front end builds each one's settings from the tool's own command-line options, runs it as its command and shows
 its report. The nets and the source part can be picked on the board there (the options' `pick`, kicad2ems API 2.11). Asked for the temperature without any heat typed, `elmer_thermal` takes the losses of the latest
