@@ -19,7 +19,7 @@ import sys
 
 from kicad2ems.api.analysis import Analysis
 
-API = (2, 6)
+API = (2, 11)                       # kicad2ems.api it is written against: 2.8 figures, 2.11 pick
 ORDER = ('Coils and plates', 'Nets and loads', 'Heat', 'Air and board', 'Mesh', 'Solver')
 GROUPS = dict(coil='Coils and plates', plate='Coils and plates',
               net='Nets and loads', source='Nets and loads', load='Nets and loads', copper='Nets and loads',
