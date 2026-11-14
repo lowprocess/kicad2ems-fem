@@ -245,7 +245,7 @@ def solve(board, out='thermal', heat=None, nets=None, source=None, loads=None, c
     t = time.perf_counter()
     # one thread with a current: the loop that fills Elmer's nodal Joule heating (StatCurrentSolver_post) is not
     # safe with several, and now and then gives the heat equation another source
-    elmer.solve(case, sif(m, heat, loads if nets else None, htc=htc, ambient=ambient, k_board=k_board, plating=plating),
+    said = elmer.solve(case, sif(m, heat, loads if nets else None, htc=htc, ambient=ambient, k_board=k_board, plating=plating),
                 threads=1 if nets else None)
     solve_s = time.perf_counter() - t
     T, pts = read_vtu(case / 'case_t0001.vtu', 'temperature')
@@ -255,7 +255,7 @@ def solve(board, out='thermal', heat=None, nets=None, source=None, loads=None, c
     given = htc * 1e-6 * float(((tf - ambient) * m['face_area']).sum() + ((ts - ambient) * m['side_area']).sum())
     hot = int(np.argmax(T))
     z = m['nodes'][hot, 2]
-    result = dict(format=1, tool='kicad2ems_fem.elmer.thermal', T_max=float(T.max()), T_min=float(T.min()),
+    result = dict(format=1, tool='kicad2ems_fem.elmer.thermal', engine=elmer.engine(said), T_max=float(T.max()), T_min=float(T.min()),
                   ambient=ambient, htc=htc,
                   hottest=dict(x=float(m['nodes'][hot, 0]), y=float(m['nodes'][hot, 1]),
                                layer=min(m['cells'], key=lambda c: abs(0.5 * (c[0] + c[1]) - z))[2]),

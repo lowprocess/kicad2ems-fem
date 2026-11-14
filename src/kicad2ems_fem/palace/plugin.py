@@ -122,7 +122,7 @@ class Palace(Solver):
         S, names, zref = mixed_mode(S, run.m)
         info = dict(tets=mdl.tets, nodes=mdl.nodes, hmin=mdl.hmin, hmax=mdl.hmax, margin=mdl.margin,
                     mesh_s=round(prep['mesh_s'], 1), order=s.palace_order, seconds=round(seconds, 1),
-                    parts=len(mdl.parts), edge_walls=mdl.edge_wall is not None)
+                    parts=len(mdl.parts), edge_walls=mdl.edge_wall is not None, engine=prun.engine(prep['work']))
         return Result(S, names, zref, seconds + prep['mesh_s'], info=info,
                       comment=f"Palace FEM, order {s.palace_order}, {mdl.tets} tets ({run.name})")
 

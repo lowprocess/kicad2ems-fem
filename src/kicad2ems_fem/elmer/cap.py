@@ -97,12 +97,12 @@ def solve(board, nets, out, thick=False, h=None, hmax=None, margin=None, crop=No
     mesh_s = time.time() - t
     elmer.elmergrid(os.path.join(case, 'model.msh'), os.path.join(case, 'mesh'))
     t = time.time()
-    elmer.solve(case, sif(m, order=order, far=far))
+    said = elmer.solve(case, sif(m, order=order, far=far))
     n = len(m['terminals'])
     C = maxwell(np.loadtxt(os.path.join(case, 'capacitance.dat'), ndmin=2))
     if C.shape != (n, n):
         raise RuntimeError(f"Elmer's capacitance matrix is {C.shape}, expected {n} x {n}")
-    r = dict(tool='kicad2ems_fem.elmer.cap', names=[name for name, _ in m['terminals']], C=C.tolist(), thick=bool(thick),
+    r = dict(tool='kicad2ems_fem.elmer.cap', engine=elmer.engine(said), names=[name for name, _ in m['terminals']], C=C.tolist(), thick=bool(thick),
              far=far, order=order, solver='elmer', tets=m['tets'], h=m['h'], hmax=m['hmax'], margin=m['margin'], mesh_s=round(mesh_s, 1),
              seconds=round(time.time() - t, 1))
     with open(os.path.join(str(out), 'cap.json'), 'w') as fh:

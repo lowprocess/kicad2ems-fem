@@ -89,14 +89,14 @@ def solve(board, nets, source, loads, out='dc', h=0.25, h_fine=0.05, plating=PLA
     mesh_s = time.perf_counter() - t
     elmer.elmergrid(case / 'copper.msh', case / 'mesh')
     t = time.perf_counter()
-    elmer.solve(case, sif(m, loads))
+    said = elmer.solve(case, sif(m, loads))
     s = elmer.scalars(case / 'scalars.dat')
     V = {ref: float(next(v for c, v in s.items() if 'potential' in c.lower() and f'load{k}' in c.lower()))
          for k, ref in enumerate(loads)}
     # the power the loads draw through the copper. Not Elmer's Joule heating field: the loop that fills it is not
     # safe with several threads (StatCurrentSolver_post), and now and then gives another figure
     loss = float(sum(-V[ref] * amps for ref, amps in loads.items()))
-    result = dict(format=1, tool='kicad2ems_fem.elmer.dc', nets=sorted(nets), source=source, loads=dict(loads), V=V,
+    result = dict(format=1, tool='kicad2ems_fem.elmer.dc', engine=elmer.engine(said), nets=sorted(nets), source=source, loads=dict(loads), V=V,
                   drop_mV={r: -v * 1e3 for r, v in V.items()}, loss_W=loss, tets=m['tets'], vias=m['vias'],
                   h=h, h_fine=h_fine, seconds=dict(mesh=round(mesh_s, 1), solve=round(time.perf_counter() - t, 1)))
     (out / 'dc.json').write_text(json.dumps(result, indent=1))

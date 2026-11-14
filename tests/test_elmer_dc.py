@@ -35,3 +35,4 @@ def test_strip_drop_matches_closed_form(tmp_path):
     assert -r['V']['L'] == pytest.approx(R0, rel=3e-3)
     assert r['loss_W'] == pytest.approx(-r['V']['L'] * 1.0, rel=1e-6)
     assert (tmp_path / 'dc.json').is_file()
+    assert r['engine']['program'] == 'Elmer' and r['engine']['version']         # which Elmer it was (R-B14)

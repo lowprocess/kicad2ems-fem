@@ -316,9 +316,10 @@ def solve(coils, plates=(), out='mag', h=None, margin=6.0, log=print):
     elmer.elmergrid(case / 'model.msh', case / 'mesh')
     t = time.perf_counter()
     n = len(coils)
+    said = []                                                       # the last log: which Elmer it was
 
     def energy(amps):
-        elmer.solve(case, sif(m, coils, plates, amps))
+        said[:] = [elmer.solve(case, sif(m, coils, plates, amps))]
         s = elmer.scalars(case / 'scalars.dat')
         return float(next(v for c, v in s.items() if 'electromagnetic field energy' in c.lower()))
     L = np.zeros((n, n))
@@ -329,7 +330,7 @@ def solve(coils, plates=(), out='mag', h=None, margin=6.0, log=print):
         for j in range(i):
             L[i, j] = L[j, i] = energy([float(q in (i, j)) for q in range(n)]) - 0.5 * (L[i, i] + L[j, j])
     d = np.sqrt(np.diag(L))
-    result = dict(format=1, tool='kicad2ems_fem.elmer.mag', names=[c['name'] for c in coils], L=L.tolist(),
+    result = dict(format=1, tool='kicad2ems_fem.elmer.mag', engine=elmer.engine(said[0] if said else ''), names=[c['name'] for c in coils], L=L.tolist(),
                   k=(L / np.outer(d, d)).tolist(),
                   air=air_core(coils).tolist(), coils=coils, plates=plates, tets=m['tets'], margin=margin,
                   radius=m['radius'], sizes=m['sizes'],

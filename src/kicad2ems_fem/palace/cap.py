@@ -256,7 +256,7 @@ def solve(board, nets, out, thick=False, h=None, hmax=None, margin=None, crop=No
     n = len(m['terminals'])
     post = os.path.join(work, 'postpro')
     C, Cm = read_c(post, n), read_c(post, n, 'terminal-Cm.csv')
-    r = dict(tool='kicad2ems_fem.palace.cap', names=[name for name, _ in m['terminals']], C=C.tolist(), Cm=Cm.tolist(),
+    r = dict(tool='kicad2ems_fem.palace.cap', engine=prun.engine(work), names=[name for name, _ in m['terminals']], C=C.tolist(), Cm=Cm.tolist(),
              thick=bool(thick), far=far,
              order=order, tets=m['tets'], h=m['h'], hmax=m['hmax'], margin=m['margin'], mesh_s=round(mesh_s, 1),
              seconds=round(time.time() - t, 1))

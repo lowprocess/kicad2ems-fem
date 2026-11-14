@@ -80,6 +80,18 @@ def environment(cmd):
     return env
 
 
+def engine(workdir, logfile='palace.log'):
+    """Which Palace solved a case, from what run() wrote beside its log (its changeset), for the tool's result
+    (R-B14): dict(program, version, revision, kicad2ems_fem)."""
+    from .. import __version__
+    try:
+        with open(os.path.join(workdir, logfile + '.json')) as fh:
+            changeset = json.load(fh).get('changeset')
+    except (OSError, ValueError):
+        changeset = None
+    return dict(program='Palace', version=None, revision=changeset, kicad2ems_fem=__version__)
+
+
 UNCONVERGED = ('did NOT converge', 'did not converge')          # Palace's GMRES and linear solver, as they say it
 
 

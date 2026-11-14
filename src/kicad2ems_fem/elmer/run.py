@@ -12,7 +12,6 @@ recorded (kicad2ems-site.toml: elmer), or on PATH.
 import os
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -69,6 +68,15 @@ def solve(case, sif_text, timeout=7200, threads=None):
     if p.returncode or 'ALL DONE' not in p.stdout:
         raise RuntimeError('ElmerSolver failed; see ' + str(case / 'elmer.log') + '\n' + (p.stdout + p.stderr)[-1500:])
     return p.stdout
+
+
+def engine(log_text):
+    """Which Elmer solved a case, from its log (MAIN: Version: 26.2-devel (Rev: 033b105e2, Compiled: ...)), for the
+    tool's result (R-B14): dict(program, version, revision, kicad2ems_fem); the version None when the log has none."""
+    from .. import __version__
+    m = re.search(r'Version:\s*(\S+)\s*\(Rev:\s*([^,)]+)', log_text or '')
+    return dict(program='Elmer', version=m.group(1) if m else None, revision=m.group(2).strip() if m else None,
+                kicad2ems_fem=__version__)
 
 
 def scalars(path):
