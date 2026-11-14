@@ -124,10 +124,16 @@ def test_heat_from_a_circuit_run_keeps_the_parts_on_the_board(tmp_path):
     import json
     b = strip(parts=(('Q1', 0.0, 1.0), ('C2', 10.0, 1.0)))
     b['prims']['footprints'].append(dict(ref='H1', pads=[]))     # a mounting hole: no copper to heat
-    (tmp_path / 'case.json').write_text(json.dumps(dict(load_power_W=10.0, component_power_W={
-        'Q1': 0.09, 'C2': -1e-4, 'H1': 0.5, 'PCB0': 0.002, 'PRIMARY': 10.4})))
-    heat, left = thermal.circuit_heat(b, tmp_path / 'case.json', duty=0.5)
-    assert heat == {'Q1': pytest.approx(0.045)} and set(left) == {'C2', 'H1', 'PCB0', 'PRIMARY'}
+    (tmp_path / 'flat.json').write_text(json.dumps({'Q1': 0.09, 'C2': -1e-4, 'H1': 0.5, 'PCB0': 0.002}))
+    heat, left = thermal.circuit_heat(b, tmp_path / 'flat.json', duty=0.5)
+    assert heat == {'Q1': pytest.approx(0.045)} and set(left) == {'C2', 'H1', 'PCB0'}
+    # a coupled winding: its own loss, not its V·I (the power it passes on); a switch with its gate drive
+    (tmp_path / 'coupled.json').write_text(json.dumps(dict(parts={
+        'Q1': dict(type='switch', power_W=0.05, gate_power_W=0.004),
+        'C2': dict(type='inductor', power_W=10.4, loss_W=0.2, coupled_with=['L9']),
+        'H1': dict(type='inductor', power_W=10.0, coupled_with=['L8'])})))       # (a run before loss_W: left out)
+    heat, left = thermal.circuit_heat(b, tmp_path / 'coupled.json')
+    assert heat == {'Q1': pytest.approx(0.054), 'C2': pytest.approx(0.2)} and 'H1' not in left
     (tmp_path / 'flat.json').write_text(json.dumps({'Q1': 0.2, 'C2': 0.1}))
     assert thermal.circuit_heat(b, tmp_path / 'flat.json')[0] == {'Q1': 0.2, 'C2': 0.1}
     # pcbqs.circuit's case.json: each part a table with its power (the source's negative, a load off the board)

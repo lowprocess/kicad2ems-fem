@@ -13,7 +13,6 @@ Each one's settings are its command line's options, read from the tool's own par
 appears in a front end without a change here. Only this module imports kicad2ems.api.analysis.
 """
 import json
-import math
 import os
 import re
 import sys
@@ -365,21 +364,18 @@ class ElmerMag(_Fem):
                     footer=f"Elmer, {r.get('tets', 0):,} tetrahedra, {_seconds(r):.0f} s")
 
     def suggest(self, folder):
-        """The first two coils as the wpthb bridge's (pcbqs's data/wpthb_bridge.json): the primary's and the
-        secondary's inductance and their coupling. The receiver is left as the model has it (its capacitor is not
-        retuned for the new secondary): the note says what would be resonant with it."""
+        """Each coil's inductance for the circuit model's inductor of the same name (name the coils after them:
+        --coil REF:...), and each pair's coupling for the model's coupling of those two (couplings.A+B.k): no model's
+        names are assumed. (It had written the wpthb bridge's PRIMARY, SECONDARY and couplings.0.)"""
         r = self._read(folder)
-        if not r or r.get('tool') != self.module or len(r['names']) < 2:
+        if not r or r.get('tool') != self.module or not r.get('names'):
             return []
-        n, L = r['names'], r['L']
-        l1, l2, k = L[0][0], L[1][1], abs(r['k'][1][0])
-        tuned = lambda f: 1 / ((2 * math.pi * f) ** 2 * l2) * 1e9
-        return [dict(to='circuit', label=f"Use these coils in the circuit ({n[0]} {l1 * 1e6:.3g} uH, "
-                                         f"{n[1]} {l2 * 1e6:.3g} uH, k {k:.3f})",
-                     values=dict(set='\n'.join([f"PRIMARY.value={l1:.6g}", f"SECONDARY.value={l2:.6g}",
-                                                f"couplings.0.k={k:.4f}"])), need=[],
-                     note="the circuit model's coils PRIMARY and SECONDARY and their coupling (pcbqs's wpthb bridge "
-                          "names them so; another model's: edit the references in Set). Its receiver stays as it "
-                          f"is: series-resonant with this {n[1]} at 90 kHz would be {tuned(90e3):.3g} nF "
-                          f"({tuned(110e3):.3g} nF at 110 kHz), where the bridge's c2 is 130 nF for its 24 uH; add "
-                          f"parameters.c2 to Set for that")]
+        n, L, k = r['names'], r['L'], r['k']
+        sets = [f"{a}.value={L[i][i]:.6g}" for i, a in enumerate(n)]
+        sets += [f"couplings.{n[j]}+{n[i]}.k={abs(k[i][j]):.4f}" for i in range(len(n)) for j in range(i)
+                 if abs(k[i][j]) >= 1e-3]
+        return [dict(to='circuit', label=f"Use these coils in the circuit ({', '.join(n)})",
+                     values=dict(set='\n'.join(sets)), need=[],
+                     note="the circuit model's inductors of these names and their couplings (a coil named otherwise: "
+                          "edit the references in Set); a resonant capacitor that was tuned to the old inductance "
+                          "is not retuned")]

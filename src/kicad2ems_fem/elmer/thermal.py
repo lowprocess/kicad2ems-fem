@@ -7,9 +7,8 @@ whose copper's resistance follows its temperature.
 
 --heat REF=WATTS puts a part's dissipation into the copper under its pads, spread evenly (REF.PAD: under that pad
 only); REF=WATTS@DUTY is a part that dissipates WATTS for that fraction of the time, heated by the mean. --heat-from
-takes every part's dissipation from a circuit run: pcbqs's case.json (pcbqs.circuit's parts with their power_W;
-an older full-bridge run's component_power_W is read too), or any JSON
-{REF: watts}; FILE@DUTY for a converter that runs part of the
+takes every part's dissipation from a circuit run: pcbqs's case.json (pcbqs.circuit's parts: their power_W, a
+coupled winding's own loss_W, a switch's gate drive with it), or any JSON {REF: watts}; FILE@DUTY for a converter that runs part of the
 time. A --heat for the same part replaces the file's figure. The temperature is the steady one for the mean power:
 right when the on and off times are short beside the seconds a part's copper takes to warm. --net, --source and
 --load are dc.py's: the current's own heat is added, and the drops are those of the warm copper. Writes
@@ -188,18 +187,18 @@ def read_vtu(path, name):
 
 def circuit_heat(board, path, duty=1.0):
     """The parts' dissipation from a circuit run, for solve(heat=): ({REF: W}, {name: W left out}). path: a
-    case.json of pcbqs's (pcbqs.circuit's parts, each with its power_W; the bridge tool's component_power_W) or a
-    JSON {REF: W}. Left out: what is not a part with copper pads on the board
-    (the copper model's ports, the source, the coil and what lies beyond it) and what dissipates nothing."""
+    case.json of pcbqs's (pcbqs.circuit's parts: each one's power_W; a coupled winding's own loss_W, its V·I being
+    the power it passes on as well; a switch's gate_power_W with it) or a JSON {REF: W}. Left out: what is not a part
+    with copper pads on the board (the copper model's ports, the source, the coil and what lies beyond it), what
+    dissipates nothing, and a coupled winding whose own loss the run did not measure."""
     data = json.loads(Path(path).read_text())
-    if isinstance(data, dict) and isinstance(data.get('parts'), dict) and 'component_power_W' not in data:
+    if isinstance(data, dict) and isinstance(data.get('parts'), dict):
         # pcbqs.circuit's case.json: {REF: {type, power_W, ...}} (a source's is negative: what it delivers)
-        data = {ref: p['power_W'] for ref, p in data['parts'].items()
-                if isinstance(p, dict) and isinstance(p.get('power_W'), (int, float))}
-    else:
-        data = data.get('component_power_W', data) if isinstance(data, dict) else data
+        own = lambda p: p['loss_W'] if 'loss_W' in p else (None if p.get('coupled_with') else p['power_W'])
+        data = {ref: own(p) + p.get('gate_power_W', 0.0) for ref, p in data['parts'].items()
+                if isinstance(p, dict) and isinstance(p.get('power_W'), (int, float)) and own(p) is not None}
     if not isinstance(data, dict) or not all(isinstance(v, (int, float)) for v in data.values()):
-        raise ValueError(f"{path}: expected a circuit run's case.json (parts, or component_power_W), or {{REF: watts}}")
+        raise ValueError(f"{path}: expected a circuit run's case.json (its parts), or {{REF: watts}}")
     if not 0 < duty <= 1:
         raise ValueError('duty: a fraction of the time, above 0 and at most 1')
     refs = {f['ref'] for f in board['prims']['footprints'] if any(p.get('geom') for p in f.get('pads', []))}

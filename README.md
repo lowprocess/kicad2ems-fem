@@ -248,13 +248,11 @@ python -m kicad2ems_fem.elmer.mag --coil tx:turns=10,inner=10.25,outer=22,z=0,t=
 **In a study.** The tool is also the engine of the question *Coils and ferrite* (`elmer_mag`), which needs no
 board: in kicad2ems's window, tick it under *Power*, describe each coil and each plate on a line of its own
 (`tx: turns=10 inner=10.25 outer=22 z=0 t=1`; spaces or commas between), and run. Its report has the
-inductances, the coupling and the same coils in air, and its result offers *Use these coils in the circuit*: the
-primary's and the secondary's inductance and their coupling, into the circuit's settings (`pcbqs.circuit
---set PRIMARY.value=... --set SECONDARY.value=... --set couplings.0.k=...`: pcbqs's wpthb bridge names its coils
-so) for the model on the Circuit page, so a wireless-power bridge's run uses the coils as solved, not a datasheet's
-figure. The receiver stays as the model has it: its capacitor is not retuned for the new secondary (the note
-says what would be series-resonant with it at 90 and 110 kHz, to add as `parameters.c2` if wanted), so a much
-smaller secondary may leave the bridge short of its target power. In a config:
+inductances, the coupling and the same coils in air, and its result offers *Use these coils in the circuit*:
+each coil's inductance for the circuit model's inductor of the same name, and each pair's coupling for the model's
+coupling of those two (`pcbqs.circuit --set tx.value=... --set rx.value=... --set couplings.tx+rx.k=...`: name the
+coils after the model's inductors), so a circuit's run uses the coils as solved, not a datasheet's figure. A
+capacitor tuned to the old inductance is not retuned. In a config:
 `[analysis.elmer_mag] coil = ["tx: turns=10 ...", "rx: ..."]`.
 
 Left out: the winding's resistance and its skin and proximity loss, the ferrite's loss and saturation, metal
