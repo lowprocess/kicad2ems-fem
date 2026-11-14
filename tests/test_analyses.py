@@ -197,5 +197,6 @@ def test_coils_with_ferrite_are_a_question_of_their_own_with_no_board(tmp_path, 
     assert figs['L tx'] == pytest.approx(6.45) and figs['k tx,rx'] == pytest.approx(0.567)
     s, = a.suggest(str(tmp_path))
     assert s['to'] == 'circuit' and s['values'] == dict(set='PRIMARY.value=6.45e-06\nSECONDARY.value=6.8e-06\ncouplings.0.k=0.5670')
+    assert 'at 90 kHz would be 460 nF (308 nF at 110 kHz)' in s['note']        # the receiver left as it is, said
     (tmp_path / 'mag.json').write_text(json.dumps(dict(r, names=['tx'], L=[[6.45e-6]], k=[[1.0]], air=[[3.74e-6]])))
     assert a.suggest(str(tmp_path)) == [] and 'k ' not in a.report(str(tmp_path))['summary']     # one coil: no pair

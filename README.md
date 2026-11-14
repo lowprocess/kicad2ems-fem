@@ -251,7 +251,11 @@ board: in kicad2ems's window, tick it under *Power*, describe each coil and each
 inductances, the coupling and the same coils in air, and its result offers *Use these coils in the circuit*: the
 primary's and the secondary's inductance and their coupling, into the circuit's settings (`pcbqs.circuit
 --set PRIMARY.value=... --set SECONDARY.value=... --set couplings.0.k=...`: pcbqs's wpthb bridge names its coils
-so), so a wireless-power bridge's run uses the coils as solved, not a datasheet's figure. In a config: `[analysis.elmer_mag] coil = ["tx: turns=10 ...", "rx: ..."]`.
+so) for the model on the Circuit page, so a wireless-power bridge's run uses the coils as solved, not a datasheet's
+figure. The receiver stays as the model has it: its capacitor is not retuned for the new secondary (the note
+says what would be series-resonant with it at 90 and 110 kHz, to add as `parameters.c2` if wanted), so a much
+smaller secondary may leave the bridge short of its target power. In a config:
+`[analysis.elmer_mag] coil = ["tx: turns=10 ...", "rx: ..."]`.
 
 Left out: the winding's resistance and its skin and proximity loss, the ferrite's loss and saturation, metal
 nearby (a shield or a battery behind the ferrite carries eddy currents; this is a static field), and coils drawn

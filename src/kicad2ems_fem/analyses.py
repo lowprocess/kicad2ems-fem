@@ -13,6 +13,7 @@ Each one's settings are its command line's options, read from the tool's own par
 appears in a front end without a change here. Only this module imports kicad2ems.api.analysis.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -364,16 +365,21 @@ class ElmerMag(_Fem):
                     footer=f"Elmer, {r.get('tets', 0):,} tetrahedra, {_seconds(r):.0f} s")
 
     def suggest(self, folder):
-        """The first two coils as the full bridge's coil model: the primary's and the secondary's inductance and
-        their coupling."""
+        """The first two coils as the wpthb bridge's (pcbqs's data/wpthb_bridge.json): the primary's and the
+        secondary's inductance and their coupling. The receiver is left as the model has it (its capacitor is not
+        retuned for the new secondary): the note says what would be resonant with it."""
         r = self._read(folder)
         if not r or r.get('tool') != self.module or len(r['names']) < 2:
             return []
         n, L = r['names'], r['L']
         l1, l2, k = L[0][0], L[1][1], abs(r['k'][1][0])
+        tuned = lambda f: 1 / ((2 * math.pi * f) ** 2 * l2) * 1e9
         return [dict(to='circuit', label=f"Use these coils in the circuit ({n[0]} {l1 * 1e6:.3g} uH, "
                                          f"{n[1]} {l2 * 1e6:.3g} uH, k {k:.3f})",
                      values=dict(set='\n'.join([f"PRIMARY.value={l1:.6g}", f"SECONDARY.value={l2:.6g}",
                                                 f"couplings.0.k={k:.4f}"])), need=[],
                      note="the circuit model's coils PRIMARY and SECONDARY and their coupling (pcbqs's wpthb bridge "
-                          "names them so; another model's: edit the references in Set)")]
+                          "names them so; another model's: edit the references in Set). Its receiver stays as it "
+                          f"is: series-resonant with this {n[1]} at 90 kHz would be {tuned(90e3):.3g} nF "
+                          f"({tuned(110e3):.3g} nF at 110 kHz), where the bridge's c2 is 130 nF for its 24 uH; add "
+                          f"parameters.c2 to Set for that")]
