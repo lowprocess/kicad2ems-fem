@@ -2,7 +2,7 @@
 Running Palace and reading its S-parameters.
 
     launcher()                            # how Palace is started here: ('native', path) or ('podman', rootfs), or None
-    run(workdir, 'palace.json', np=8)     # runs it there, returns its log
+    run(workdir, 'palace.json')           # runs it there (np: one rank per fast core), returns its log
     f, S = read_s(workdir + '/postpro', nports)
     f, P = read_incident(workdir + '/postpro', 1)         # the driven port's incident power, each solve
     f, th, ph, E = read_farfield(workdir + '/postpro')    # the far field r E at the config's angles
@@ -16,6 +16,7 @@ Palace is found as
   each also as kicad2ems's installer recorded it (kicad2ems-site.toml: palace, palace_rootfs), after the
   environment's and before PATH's
 """
+import json
 import os
 import shutil
 import subprocess
@@ -42,8 +43,21 @@ def launcher():
     return None
 
 
-def command(workdir, cfg, np=8, threads=1, how=None):
+def ranks(np=None):
+    """Palace's MPI processes: np, else one per fast core (emsdev's count: a hybrid CPU's P-cores), at least 1.
+    (8 had been fixed: the development machine's P-cores.)"""
+    if np:
+        return int(np)
+    try:
+        from emsdev.cpu import core_threads
+        return max(1, int(core_threads()))
+    except ImportError:
+        return max(1, (os.cpu_count() or 2) // 2)
+
+
+def command(workdir, cfg, np=None, threads=1, how=None):
     how = how or launcher()
+    np = ranks(np)
     if how is None:
         raise RuntimeError("Palace not found: set K2E_PALACE to its executable, or K2E_PALACE_ROOTFS to an unpacked "
                            "Palace image (README)")
@@ -66,8 +80,15 @@ def environment(cmd):
     return env
 
 
-def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None, logfile='palace.log'):
+UNCONVERGED = ('did NOT converge', 'did not converge')          # Palace's GMRES and linear solver, as they say it
+
+
+def run(workdir, cfg, np=None, threads=1, log=print, how=None, timeout=None, logfile='palace.log'):
+    """Run Palace on `cfg` in workdir; its log's tail. The lines where its solvers did not converge are said (a
+    WARNING, which a kicad2ems run lists) and, with its changeset, written to <logfile>.json beside the log (only its
+    exit code had been read: an unconverged solve gave S-parameters as a converged one)."""
     cmd, cwd = command(workdir, cfg, np, threads, how)
+    unconverged, changeset = [], None
     with open(os.path.join(workdir, logfile), 'w') as fh:
         from .. import children                             # its own process group: stopped with the tool
         p = children.popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -78,6 +99,10 @@ def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None, logfil
             fh.flush()                                      # the log can be followed while Palace runs
             tail = (tail + [line.rstrip()])[-40:]
             head = line.lstrip()
+            if any(u in line for u in UNCONVERGED):
+                unconverged.append(line.strip())
+            elif head.startswith('Git changeset ID:'):
+                changeset = head.split(':', 1)[1].strip()
             if head.startswith('It '):                      # one a second: the swept model answers 100s at once
                 if time.time() - shown < 1.0:
                     continue
@@ -87,6 +112,11 @@ def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None, logfil
         rc = p.wait(timeout)
     if children.stopped(p):
         children.raise_stopped()
+    with open(os.path.join(workdir, logfile + '.json'), 'w') as fh:
+        json.dump(dict(changeset=changeset, ranks=ranks(np), unconverged=unconverged), fh, indent=1)
+    if unconverged:
+        log(f"WARNING palace: its solver did not converge {len(unconverged)} time(s) (see {logfile}): "
+            f"{unconverged[-1]}")
     if rc:
         raise RuntimeError(f"palace exited {rc}:\n" + '\n'.join(tail[-20:]))
     return '\n'.join(tail)

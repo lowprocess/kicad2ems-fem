@@ -67,3 +67,20 @@ def test_a_tool_s_sigterm_stops_its_solvers(tmp_path):
     assert tool.wait(10) == 143
     time.sleep(0.2)
     assert not _group_alive(pid)
+
+
+def test_palace_s_unconverged_solves_are_said(tmp_path, monkeypatch):
+    """Palace's own words for a solve that did not converge are a WARNING and kept with its changeset beside the log
+    (only its exit code had been read); its ranks default to the fast cores (8 had been fixed)."""
+    import json, sys
+    from kicad2ems_fem.palace import run as prun
+    script = tmp_path / 'fake_palace.py'
+    script.write_text("print('Git changeset ID: abc123')\nprint('GMRES solver did NOT converge in 400 iterations')\n"
+                      "print('Linear solver did not converge, norm(Ax-b)/norm(b) = 1.3e-05')\n")
+    monkeypatch.setattr(prun, 'command', lambda workdir, cfg, np, threads, how: ([sys.executable, str(script)], workdir))
+    said = []
+    prun.run(str(tmp_path), 'palace.json', log=said.append)
+    info = json.loads((tmp_path / 'palace.log.json').read_text())
+    assert info['changeset'] == 'abc123' and len(info['unconverged']) == 2
+    assert any(s.startswith('WARNING palace: its solver did not converge 2 time(s)') for s in said)
+    assert prun.ranks(None) >= 1 and prun.ranks(3) == 3

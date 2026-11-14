@@ -236,7 +236,7 @@ def read_c(postpro, n, name='terminal-C.csv'):
     return data[:, 1:]
 
 
-def solve(board, nets, out, thick=False, h=None, hmax=None, margin=None, crop=None, order=2, far='open', np_=8,
+def solve(board, nets, out, thick=False, h=None, hmax=None, margin=None, crop=None, order=2, far='open', np_=None,
           log=print):
     """The capacitance matrix between `nets` (each a conductor; 'A+B' joins nets). Returns dict(names, C, Cm (F),
     tets, h, hmax, margin, seconds) and writes it to <out>/cap.json; Palace's case is in <out>/palace."""
@@ -287,7 +287,7 @@ def parser():
     ap.add_argument('--region', help='x0,y0,x1,y1 (mm, model coordinates): only the board inside it')
     ap.add_argument('--far', choices=('open', 'ground'), default='open', help="the air box's faces (default open)")
     ap.add_argument('--order', type=int, default=2, help="Palace's element order (default 2)")
-    ap.add_argument('--np', type=int, default=8, help="Palace's MPI processes (default 8)")
+    ap.add_argument('--np', type=int, default=0, help="Palace's MPI processes (default 0: one per fast core)")
     return ap
 
 

@@ -60,7 +60,7 @@ class Palace(Solver):
         Option('palace_margin', None, "air around the board, mm (default: a quarter wavelength at fmax, at least 10x "
                "the stack; antenna mode: half a wavelength at the band centre)", float, name='margin',
                gui='Palace air margin (mm)', group=G),
-        Option('palace_np', 8, "Palace's MPI processes (default {default}: the P-cores)", int, name='np',
+        Option('palace_np', 0, "Palace's MPI processes (default {default}: one per fast core, emsdev's count)", int, name='np',
                gui='Palace processes', group=G),
         Option('palace_loss', False, "copper loss: the sheets as Palace's finite-thickness conductivity boundary "
                "instead of PEC (good to ~10 MHz; high above)", bool, name='loss', gui='Palace copper loss', group=G),
