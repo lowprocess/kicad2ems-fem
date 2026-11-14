@@ -364,6 +364,8 @@ def parser():
 
 
 def main(argv=None):
+    from .. import children
+    children.guard()                                        # its solvers stopped with it
     ap = parser()
     a = ap.parse_args(argv)
     heat, loads = _pairs(ap, a.heat, '--heat', 'WATTS'), _pairs(ap, a.load, '--load', 'AMPS')

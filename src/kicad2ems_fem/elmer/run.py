@@ -50,7 +50,8 @@ def elmergrid(msh, folder):
     folder = Path(folder)
     if folder.exists():
         shutil.rmtree(folder)
-    p = subprocess.run([_tool('ElmerGrid'), '14', '2', str(msh), '-out', str(folder)], capture_output=True, text=True)
+    from .. import children
+    p = children.run([_tool('ElmerGrid'), '14', '2', str(msh), '-out', str(folder)], timeout=3600)
     if p.returncode:
         raise RuntimeError('ElmerGrid failed: ' + (p.stdout + p.stderr)[-1500:])
     return folder
@@ -61,8 +62,9 @@ def solve(case, sif_text, timeout=7200, threads=None):
     case = Path(case)
     (case / 'case.sif').write_text(sif_text)
     (case / 'ELMERSOLVER_STARTINFO').write_text('case.sif\n1\n')
-    p = subprocess.run([_tool('ElmerSolver'), 'case.sif'], cwd=case, capture_output=True, text=True, timeout=timeout,
-                       env=None if threads is None else {**os.environ, 'OMP_NUM_THREADS': str(threads)})
+    from .. import children                                 # its own process group, stopped with the tool; a
+    p = children.run([_tool('ElmerSolver'), 'case.sif'], cwd=case, timeout=timeout,   # timeout: RuntimeError
+                     env=None if threads is None else {**os.environ, 'OMP_NUM_THREADS': str(threads)})
     (case / 'elmer.log').write_text(p.stdout + p.stderr)
     if p.returncode or 'ALL DONE' not in p.stdout:
         raise RuntimeError('ElmerSolver failed; see ' + str(case / 'elmer.log') + '\n' + (p.stdout + p.stderr)[-1500:])

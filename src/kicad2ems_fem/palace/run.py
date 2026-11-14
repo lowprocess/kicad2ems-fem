@@ -69,8 +69,9 @@ def environment(cmd):
 def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None, logfile='palace.log'):
     cmd, cwd = command(workdir, cfg, np, threads, how)
     with open(os.path.join(workdir, logfile), 'w') as fh:
-        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                             env=environment(cmd))
+        from .. import children                             # its own process group: stopped with the tool
+        p = children.popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                           env=environment(cmd))
         tail, shown = [], 0.0
         for line in p.stdout:
             fh.write(line)
@@ -84,6 +85,8 @@ def run(workdir, cfg, np=8, threads=1, log=print, how=None, timeout=None, logfil
             if head.startswith(('It ', 'Computing', 'Adaptive', 'Greedy', 'Elapsed', 'Total')):
                 log('palace: ' + line.strip())
         rc = p.wait(timeout)
+    if children.stopped(p):
+        children.raise_stopped()
     if rc:
         raise RuntimeError(f"palace exited {rc}:\n" + '\n'.join(tail[-20:]))
     return '\n'.join(tail)

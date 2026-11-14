@@ -117,6 +117,8 @@ def parser():
 
 
 def main(argv=None):
+    from .. import children
+    children.guard()                                        # its solvers stopped with it
     ap = parser()
     a = ap.parse_args(argv)
     loads = {}

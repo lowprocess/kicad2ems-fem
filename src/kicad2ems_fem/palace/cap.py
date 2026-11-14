@@ -292,6 +292,8 @@ def parser():
 
 
 def main(argv=None):
+    from .. import children
+    children.guard()                                        # its solvers stopped with it
     a = parser().parse_args(argv)
     crop = box(*[float(v) for v in a.region.split(',')]) if a.region else None
     r = solve(a.board, a.net, a.out, thick=a.thick, h=a.h, hmax=a.hmax, margin=a.margin, crop=crop, order=a.order,
