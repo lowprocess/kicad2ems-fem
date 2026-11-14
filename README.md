@@ -198,8 +198,8 @@ python -m kicad2ems_fem.elmer.thermal board.kicad_pcb --net VHB --source L3 --lo
   (default 10 W/m²/K: still air with radiation near 60 °C) above `--ambient`.
 - **Heat:** `--heat REF=WATTS` spreads a part's dissipation over the copper under its pads (`REF.PAD`: one pad).
   `WATTS@DUTY` is a part that dissipates for that fraction of the time: the mean heats it.
-- **From the circuit:** `--heat-from` takes every part's dissipation from pcbqs's power-circuit run: its
-  `case.json` has `component_power_W`, each part's mean terminal power over the ngspice transient. Any JSON
+- **From the circuit:** `--heat-from` takes every part's dissipation from a pcbqs circuit run: its
+  `case.json` has each part's `power_W`, its mean terminal power over the reported period. Any JSON
   `{REF: watts}` works too; `FILE@DUTY` is a converter that runs part of the time. Entries that are not parts on
   the board (the copper model's ports, the source, the coils) are listed and left out.
 - **A rail's own heat:** `--net`, `--source`, `--load` as the DC tool. The copper's resistance follows its
@@ -249,9 +249,9 @@ python -m kicad2ems_fem.elmer.mag --coil tx:turns=10,inner=10.25,outer=22,z=0,t=
 board: in kicad2ems's window, tick it under *Power*, describe each coil and each plate on a line of its own
 (`tx: turns=10 inner=10.25 outer=22 z=0 t=1`; spaces or commas between), and run. Its report has the
 inductances, the coupling and the same coils in air, and its result offers *Use these coils in the circuit*: the
-primary's and the secondary's inductance and their coupling, into the full bridge's settings
-(`pcbqs.power_circuit --primary-l --secondary-l --coupling`), so a wireless-power bridge's run uses the coils as
-solved, not a datasheet's figure. In a config: `[analysis.elmer_mag] coil = ["tx: turns=10 ...", "rx: ..."]`.
+primary's and the secondary's inductance and their coupling, into the circuit's settings (`pcbqs.circuit
+--set PRIMARY.value=... --set SECONDARY.value=... --set couplings.0.k=...`: pcbqs's wpthb bridge names its coils
+so), so a wireless-power bridge's run uses the coils as solved, not a datasheet's figure. In a config: `[analysis.elmer_mag] coil = ["tx: turns=10 ...", "rx: ..."]`.
 
 Left out: the winding's resistance and its skin and proximity loss, the ferrite's loss and saturation, metal
 nearby (a shield or a battery behind the ferrite carries eddy currents; this is a static field), and coils drawn

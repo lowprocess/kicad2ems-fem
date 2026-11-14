@@ -370,10 +370,10 @@ class ElmerMag(_Fem):
         if not r or r.get('tool') != self.module or len(r['names']) < 2:
             return []
         n, L = r['names'], r['L']
-        vals = dict(primary_l=round(L[0][0] * 1e6, 4), secondary_l=round(L[1][1] * 1e6, 4),
-                    coupling=round(abs(r['k'][1][0]), 4))
-        return [dict(to='circuit', label=f"Use these coils in the circuit ({n[0]} {vals['primary_l']:.3g} uH, "
-                                         f"{n[1]} {vals['secondary_l']:.3g} uH, k {vals['coupling']:.3f})",
-                     values=vals, need=[],
-                     note="the full bridge's coil model (pcbqs.power_circuit): its primary and secondary "
-                          "inductance and their coupling")]
+        l1, l2, k = L[0][0], L[1][1], abs(r['k'][1][0])
+        return [dict(to='circuit', label=f"Use these coils in the circuit ({n[0]} {l1 * 1e6:.3g} uH, "
+                                         f"{n[1]} {l2 * 1e6:.3g} uH, k {k:.3f})",
+                     values=dict(set='\n'.join([f"PRIMARY.value={l1:.6g}", f"SECONDARY.value={l2:.6g}",
+                                                f"couplings.0.k={k:.4f}"])), need=[],
+                     note="the circuit model's coils PRIMARY and SECONDARY and their coupling (pcbqs's wpthb bridge "
+                          "names them so; another model's: edit the references in Set)")]

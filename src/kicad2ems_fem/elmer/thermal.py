@@ -7,8 +7,8 @@ whose copper's resistance follows its temperature.
 
 --heat REF=WATTS puts a part's dissipation into the copper under its pads, spread evenly (REF.PAD: under that pad
 only); REF=WATTS@DUTY is a part that dissipates WATTS for that fraction of the time, heated by the mean. --heat-from
-takes every part's dissipation from a circuit run: pcbqs's case.json (pcbqs.circuit's parts with their power_W, or
-the bridge tool's component_power_W: each part's mean terminal power in the ngspice transient), or any JSON
+takes every part's dissipation from a circuit run: pcbqs's case.json (pcbqs.circuit's parts with their power_W;
+an older full-bridge run's component_power_W is read too), or any JSON
 {REF: watts}; FILE@DUTY for a converter that runs part of the
 time. A --heat for the same part replaces the file's figure. The temperature is the steady one for the mean power:
 right when the on and off times are short beside the seconds a part's copper takes to warm. --net, --source and
