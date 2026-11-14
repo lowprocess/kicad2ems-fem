@@ -9,9 +9,9 @@ description = "kicad2ems's finite-element solvers: the board meshed by gmsh, sol
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-or-later"}
-authors = [{ name = "Claude", email = "noreply@anthropic.com" }]
+authors = [{ name = "Claude" }, { name = "lowprocess" }]
 dependencies = [
-    "kicad2ems>=261112.post1",     # kicad2ems.api.solver 2.1, kicad2ems.api.analysis 2.6
+    "kicad2ems>=0.3.0",            # kicad2ems.api.solver 2.1, kicad2ems.api.analysis 2.6
     "numpy>=1.24",
     "shapely>=2.0",
     "gmsh>=4.11",
