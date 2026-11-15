@@ -13,7 +13,7 @@ from kicad2ems import analyses as registry_module, study
 from kicad2ems_fem import analyses as A
 from kicad2ems_fem.elmer import run as elmer
 
-ALL = (A.ElmerDC, A.ElmerThermal, A.ElmerCap, A.PalaceCap, A.ElmerMag)
+ALL = (A.ElmerDC, A.ElmerThermal, A.ElmerCap, A.PalaceCap, A.ElmerMag, A.PalaceLoop)
 
 
 class _EP:
@@ -34,11 +34,12 @@ def registered(monkeypatch):
 
 
 def test_they_register_as_engines_of_questions_others_answer_too(registered):
-    assert list(registered) == ['elmer_dc', 'elmer_mag', 'elmer_thermal', 'elmer_cap', 'palace_cap']
+    assert list(registered) == ['elmer_dc', 'palace_loop', 'elmer_mag', 'elmer_thermal', 'elmer_cap', 'palace_cap']
     assert not registry_module.broken
     es = study.engines()
-    assert [es[n].provides for n in registered] == [('dc',), ('coils',), ('thermal',), ('capacitance',), ('capacitance',)]
-    assert [es[n].label for n in registered] == ['Elmer', 'Elmer', 'Elmer', 'Elmer', 'Palace']
+    assert [es[n].provides for n in registered] == [('dc',), ('nearfield',), ('coils',), ('thermal',), ('capacitance',),
+                                                    ('capacitance',)]
+    assert [es[n].label for n in registered] == ['Elmer', 'Palace', 'Elmer', 'Elmer', 'Elmer', 'Palace']
     rows = {r['question'].name: r for g in study.study_tree() for r in g['questions']}
     assert [e.name for e in rows['capacitance']['engines']] == ['elmer_cap', 'palace_cap']
     import tomllib
@@ -216,3 +217,43 @@ def test_coils_with_ferrite_are_a_question_of_their_own_with_no_board(tmp_path, 
     (tmp_path / 'mag.json').write_text(json.dumps(dict(r, names=['tx'], L=[[6.45e-6]], k=[[1.0]], air=[[3.74e-6]])))
     (s,) = a.suggest(str(tmp_path))                                 # one coil: its inductance, no pair
     assert s['values'] == dict(set='tx.value=6.45e-06') and 'k ' not in a.report(str(tmp_path))['summary']
+
+
+def test_the_palace_loop_takes_pcbqs_near_field_run(tmp_path):
+    """R-E22: palace_loop answers the near field's question with the loop of the board's newest pcbqs near-field run
+    (results['mqs']), its figures named as pcbqs's are so a study lays the two side by side."""
+    a = A.PalaceLoop()
+    assert 'nearfield' in a.provides and a.engine == 'Palace'
+    opts = {o['key']: o for o in a.options()}
+    assert not opts['mqs']['required'] and 'hmin' in opts
+    assert a.missing({}, 'b.kicad_pcb', {})[0]['key'] == 'mqs' and a.missing({}, 'b.kicad_pcb', {'mqs': 'run'}) == []
+    with pytest.raises(ValueError, match='near field'):
+        a.command({}, 'b.kicad_pcb', str(tmp_path))
+    cmd = a.command(dict(hmin='0.4'), 'b.kicad_pcb', str(tmp_path / 'o'), results={'mqs': '/runs/mqs_U69'})
+    assert cmd[1:7] == ['-m', 'kicad2ems_fem.palace.loop', '--mqs', '/runs/mqs_U69', '--out', str(tmp_path / 'o')]
+    assert cmd[cmd.index('--hmin') + 1] == '0.4' and '--order' not in cmd
+    r = dict(format=1, tool='kicad2ems_fem.palace.loop', selection=dict(converter='U69', vin='+5V'),
+             frequencies_Hz=[6e5, 1.2e7], L_H=[2.9e-10, 2.8e-10], R_ohm=[0.0, 0.0], straps=['C35', 'C76'],
+             missing_capacitors=[], pcbqs=dict(L_H=[3.74e-10, 2.78e-10]), tets=123000, seconds=dict(mesh=4, solve=300))
+    (tmp_path / 'loop.json').write_text(json.dumps(r))
+    assert a.owns(str(tmp_path))
+    figs = {f['name']: f['value'] for f in a.figures(str(tmp_path))}
+    assert figs == {'loop L at 0.6 MHz': pytest.approx(0.29), 'loop L at 12 MHz': pytest.approx(0.28)}
+    rep = a.report(str(tmp_path))
+    assert rep['summary'] == 'L 0.28 nH at 12 MHz (pcbqs 0.278 nH)'
+    assert rep['sections'][0]['table']['rows'][1][:3] == [12.0, pytest.approx(0.28), pytest.approx(0.278)]
+
+
+def test_the_loops_port_crosses_the_converters_closest_input_and_ground_pads():
+    from types import SimpleNamespace
+    from kicad2ems_fem.palace import loop
+    pad = lambda net, x0, x1, y0=0.0, y1=1.0, layers=('F.Cu',): dict(net=net, layers=list(layers), geom=box(x0, y0, x1, y1))
+    raw = SimpleNamespace(footprints=[dict(ref='U1', pads=[pad('VIN', 0, 1), pad('GND', 1.5, 2.5), pad('GND', 0, 1, 3, 4),
+                                                           pad('SW', 5, 6)])])
+    spec, gap = loop.port_spec(raw, 'U1', 'VIN', 'GND')
+    assert spec == 'P1@1.25,0.5,F.Cu,0' and gap == pytest.approx(0.5)          # along x, the 0.5 mm gap
+    with pytest.raises(ValueError):
+        loop.port_spec(raw, 'U2', 'VIN', 'GND')
+    with pytest.raises(ValueError):
+        loop.port_spec(raw, 'U1', 'VIN', 'AGND')
+

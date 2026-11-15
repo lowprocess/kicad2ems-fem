@@ -187,6 +187,26 @@ unknowns: by default what 70 % of the memory available holds at Palace's 12 MB a
 double the mesh). On `rf_shielded` it took twice the time of the default mesh for a slightly coarser answer, so
 the default stays `feature = 4`; `amr` is for checking that an answer has settled.
 
+### A converter's input loop
+
+`python -m kicad2ems_fem.palace.loop --mqs <a pcbqs near-field run> --out loop`, and in a study the engine
+*Converter loop (Palace)* of the near field's question, which takes the board's newest pcbqs near-field run: the
+loop pcbqs found (its converter, input net, ground, input capacitors and crop) solved again in 3D. The copper is
+kicad2ems's board of the same KiCad file, cropped as pcbqs cropped it, as PEC sheets and holes; the input
+capacitors are metal straps (pcbqs's copper inductance has the parts' ESL apart); the source a lumped port across
+the converter's closest input and ground pads, its reference resistance near the loop's own |Z| (against 50 Ω, a
+milliohm loop's S11 is within 1e-4 of −1 and Palace read 1.43 Ω of loss out of PEC). `loop.json` has L at each of
+the run's harmonics beside pcbqs's, and both engines name them `loop L at F MHz`, so a study shows them side by
+side.
+
+On the Jetson baseboard's U69 (a SOT-563 buck from +5V, C35 and C76 at its input): Palace 0.219 to 0.198 nH from
+0.6 to 12 MHz (123,000 tetrahedra at `hmin` 0.25 mm, 2.3 min, ~12 GB); pcbqs 0.420 to 0.338 nH. On the validation
+suite's simple loops the two agree within 2% (`pcbqs/validation/mqs_palace.py`), so the 40% here is in how each
+models this loop, which is open: zero-thickness PEC against 35 µm copper (1.7 skin depths at 12 MHz) in a loop
+this small, the capacitors as straps in the copper plane against pcbqs's filaments, and pcbqs's source across all
+the converter's input and ground pads against one port. The finest mesh (`hmin` 0.02 mm, the board's narrowest
+gap) is 2.2 M tetrahedra, past this machine.
+
 ### Palace itself
 
 Palace is not on PyPI. `run.py` finds it as

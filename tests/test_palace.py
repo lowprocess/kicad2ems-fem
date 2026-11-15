@@ -90,6 +90,24 @@ def orphans(path):
         gmsh.finalize()
 
 
+def test_a_plane_with_holes_and_a_via_through_it_is_one_mesh(tmp_path):
+    """R-E22: an inner ground plane with an antipad (a hole, clockwise as shapely gives it) and a via through its
+    copper: gmsh's OpenCASCADE kernel turns a face's holes itself, so a hole given clockwise made a face the fragment
+    left whole, bounding no volume, and Palace stopped on the mesh (MFEM's STable3D)."""
+    from shapely.geometry import Point
+    from shapely.geometry.polygon import orient
+    b = microstrip([(3.0, 1.5, 0.1, 0.0, 0.5)])
+    b.layers = [dict(name='d1', z0=0.0, z1=0.25, er=3.5, tand=0.002, kind='diel'),
+                dict(name='d2', z0=0.25, z1=0.5, er=3.5, tand=0.002, kind='diel')]
+    b.cu_z = {'B.Cu': 0.0, 'In1.Cu': 0.25, 'F.Cu': 0.5}
+    plane = orient(box(0, -3, 10, 3).difference(Point(7.0, -1.5).buffer(0.3)), 1.0)
+    assert not plane.interiors[0].is_ccw                         # shapely's own orientation
+    b.copper = dict(b.copper, **{'In1.Cu': [plane]})
+    path = str(tmp_path / 'm.msh')
+    model.build(b, 10e9, path, log=lambda *x: None)
+    assert orphans(path) == 0
+
+
 def test_a_via_through_two_slabs_leaves_no_face_inside_its_hole(tmp_path):
     b = microstrip([(5.0, 2.0, 0.2, 0.0, 0.5)])
     b.layers = [dict(name='d1', z0=0.0, z1=0.2, er=3.5, tand=0.002, kind='diel'),

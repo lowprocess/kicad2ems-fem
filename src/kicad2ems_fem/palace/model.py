@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from shapely.geometry import Polygon, MultiPolygon, box as shp_box
+from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
 C0 = 299792458.0
@@ -81,8 +82,12 @@ def _ring(occ, coords, z):
 
 
 def _surface(occ, poly, z):
-    """A plane surface of a shapely polygon (with its holes) at height z."""
-    loops = [_ring(occ, poly.exterior.coords, z)] + [_ring(occ, h.coords, z) for h in poly.interiors]
+    """A plane surface of a shapely polygon (with its holes) at height z. Every loop runs the exterior's way
+    (counter-clockwise): gmsh's OpenCASCADE kernel turns the holes itself, and a hole given clockwise (shapely's
+    own orientation) made a face its booleans cannot cut. A ground plane of the Jetson's, through which a via
+    passed, came out of the fragment whole and bounding no volume, and Palace stopped on the mesh (R-E22)."""
+    poly = orient(poly, 1.0)                                    # exterior counter-clockwise, holes clockwise
+    loops = [_ring(occ, poly.exterior.coords, z)] + [_ring(occ, list(h.coords)[::-1], z) for h in poly.interiors]
     return occ.addPlaneSurface(loops)
 
 

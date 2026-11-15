@@ -8,6 +8,8 @@ and lay the answers side by side.
     elmer_cap       the capacitance between nets     (python -m kicad2ems_fem.elmer.cap)
     palace_cap      the same, by Palace              (python -m kicad2ems_fem.palace.cap)
     elmer_mag       wound coils beside ferrite       (python -m kicad2ems_fem.elmer.mag): its own question, no board
+    palace_loop     a converter's input loop         (python -m kicad2ems_fem.palace.loop): the loop pcbqs's near
+                    field found, its inductance again in 3D
 
 Each one's settings are its command line's options, read from the tool's own parser, so a new option of a tool
 appears in a front end without a change here. Only this module imports kicad2ems.api.analysis.
@@ -288,6 +290,69 @@ class PalaceCap(_Cap):
     tool = module = 'kicad2ems_fem.palace.cap'
     about = "the capacitance matrix of nets' copper in the board's dielectrics, by Palace's electrostatics"
     order = 61
+
+
+def _loop_L(f, L):
+    """A loop's figures: its inductance at each frequency, nH (the names pcbqs's near field gives them too)."""
+    return [dict(name=f"loop L at {fi / 1e6:g} MHz", value=li * 1e9, unit='nH') for fi, li in zip(f, L)
+            if isinstance(li, (int, float))]
+
+
+class PalaceLoop(_Fem):
+    """A converter's input loop in Palace (R-E22): the loop of the board's newest pcbqs near-field run (its converter,
+    input net, ground, input capacitors and crop) solved again in 3D, its inductance at the run's harmonics beside
+    pcbqs's. Palace stays out of pcbqs: this engine reads pcbqs's result file, not pcbqs."""
+    name, label, engine, program = 'palace_loop', 'Converter loop (Palace)', 'Palace', 'palace'
+    tool = module = 'kicad2ems_fem.palace.loop'
+    about = "a converter's input loop in 3D: its inductance, beside pcbqs's near field's"
+    order, result, provides = 35, 'loop.json', ('nearfield',)
+
+    def options(self):
+        return [dict(o, required=False) if o['key'] == 'mqs' else o for o in super().options()]
+
+    def missing(self, values, board, results=None):
+        if str(values.get('mqs') or '').strip() or (results or {}).get('mqs'):
+            return []
+        return [dict(key='mqs', text="run the near field (pcbqs) first: its loop is what Palace solves")]
+
+    def command(self, values, board, out, preview=False, results=None):
+        run = str(values.get('mqs') or '').strip() or (results or {}).get('mqs')
+        if not run:
+            raise ValueError("run the near field (pcbqs) first: its loop is what Palace solves")
+        cmd = [sys.executable, '-m', self.module, '--mqs', str(run), '--out', str(out)]
+        for o in self.options():
+            v = str(values.get(o['key']) if values.get(o['key']) is not None else '').strip()
+            if o['key'] not in ('mqs', 'out') and v and v != str(o['default']):
+                cmd += [o['flag'], v]
+        return cmd
+
+    def status(self, line):
+        return line.split(':', 1)[1].strip()[:160] if line.startswith('palace loop:') else None
+
+    def figures(self, folder):
+        r = self._read(folder)
+        return _loop_L(r['frequencies_Hz'], r['L_H']) if r and r.get('tool') == self.module else []
+
+    def report(self, folder):
+        r = self._read(folder)
+        if not r or r.get('tool') != self.module:
+            return None
+        sel, pc = r['selection'], (r.get('pcbqs') or {}).get('L_H') or [None] * len(r['L_H'])
+        rows = [[fi / 1e6, li * 1e9, p * 1e9 if p else '', f"{li / p:.3f}" if p else '']
+                for fi, li, p in zip(r['frequencies_Hz'], r['L_H'], pc)]
+        notes = ["Palace's copper is PEC: the high-frequency limit of pcbqs's, whose current leaves the copper's bulk "
+                 "for its surfaces over the harmonics; compare at the higher ones.",
+                 f"The input capacitors ({', '.join(r['straps']) or 'none'}) are metal straps, as pcbqs's copper "
+                 "inductance has them; the source a lumped port across the converter's closest input and ground pads."]
+        if r.get('missing_capacitors'):
+            notes.append(f"Not on the cropped copper, so left out: {', '.join(r['missing_capacitors'])}")
+        return dict(title=f"Converter loop (Palace): {sel['converter']}, {sel['vin']}",
+                    summary=f"L {r['L_H'][-1] * 1e9:.3g} nH at {r['frequencies_Hz'][-1] / 1e6:g} MHz"
+                            + (f" (pcbqs {pc[-1] * 1e9:.3g} nH)" if pc[-1] else ''),
+                    sections=[dict(title='Loop inductance', table=dict(
+                        columns=['f (MHz)', 'Palace (nH)', 'pcbqs (nH)', 'Palace / pcbqs'], rows=rows,
+                        formats=['.4g', '.4g', '.4g', None]))],
+                    notes=notes, footer=f"Palace, {r.get('tets', 0):,} tetrahedra, {_seconds(r):.0f} s")
 
 
 class ElmerMag(_Fem):
