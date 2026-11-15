@@ -25,7 +25,7 @@ GROUPS = dict(coil='Coils and plates', plate='Coils and plates',
               net='Nets and loads', source='Nets and loads', load='Nets and loads', copper='Nets and loads',
               heat='Heat', heat_from='Heat', htc='Air and board', ambient='Air and board', k_board='Air and board',
               far='Air and board', margin='Air and board', region='Air and board',
-              h='Mesh', h_fine='Mesh', hmax='Mesh', plating='Mesh', thick='Mesh', order='Solver', np='Solver')
+              h='Mesh', h_fine='Mesh', hmax='Mesh', plating='Mesh', mesh='Mesh', thick='Mesh', order='Solver', np='Solver')
 
 
 PICK = dict(net='nets', copper='nets', source='part')       # settings a front end may pick on the board (API 2.11)
@@ -146,7 +146,8 @@ class ElmerDC(_Fem):
                       dict(title='Loads', table=dict(columns=['load', 'current (A)', 'drop (mV)'], rows=rows,
                                                     formats=[None, '.4g', '.4f']))],
             notes=["The net's own copper and vias in 3D; series parts and the ground return are not in it."],
-            footer=f"Elmer, {r['tets']:,} tetrahedra, {_seconds(r):.1f} s")
+            footer=f"Elmer, " + (f"{r['tets']:,} tetrahedra" if 'tets' in r else f"{r.get('wedges', 0):,} wedges (layered)")
+                   + f", {_seconds(r):.1f} s")
 
     def summary(self, folder):
         r = self._read(folder)

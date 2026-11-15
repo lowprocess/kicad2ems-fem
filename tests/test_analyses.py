@@ -49,7 +49,7 @@ def test_they_register_as_engines_of_questions_others_answer_too(registered):
 
 def test_the_settings_are_the_tools_own_options():
     dc = {o['key']: o for o in A.ElmerDC().options()}
-    assert list(dc) == ['net', 'source', 'load', 'h', 'h_fine', 'plating'] and 'out' not in dc
+    assert list(dc) == ['net', 'source', 'load', 'h', 'h_fine', 'plating', 'mesh'] and 'out' not in dc
     assert dc['net']['kind'] == 'list' and dc['net']['required'] and dc['h']['default'] == 0.25 and dc['h']['kind'] == 'float'
     assert dc['source']['group'] == 'Nets and loads' and dc['plating']['group'] == 'Mesh'
     th = {o['key']: o for o in A.ElmerThermal().options()}

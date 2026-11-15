@@ -59,18 +59,20 @@ python -m kicad2ems_fem.elmer.dc board.kicad_pcb --net VHB --source L3 --load Q1
   and the return are pcbqs.pdn's job, and this checks their copper in 3D.
 - **Output:** `<out>/dc.json` (each load's voltage and drop, the copper's loss, the mesh) and Elmer's case in
   `<out>/elmer`.
-- **Mesh:** `--h` (default 0.25 mm) in the copper, `--h-fine` (0.05 mm) at vias and pad edges. Refine until the
-  drop stops moving.
+- **Mesh:** the layered mesh the thermal tool solves on (`--mesh wedge`, the default): the board's triangles,
+  cropped to the net's copper and 1 mm round it, swept through the stack as wedges, the net's copper and via
+  barrels its bodies; `--h` (default 0.25 mm) the triangles' size. `--mesh tet` meshes the copper in 3D with gmsh
+  instead (`--h-fine`, 0.05 mm, at vias and pad edges). Refine until the drop stops moving.
 
 Against pcbqs's 2D DC solve this agreed within 0.2% on the wpthb VHB rail and 1.5% on Jetson +1V15
 (pcbqs/validation). wpthb VHB, L3 to the two high-side FETs, at h 0.1 / 0.02 mm (1.1 M tetrahedra): Q1 0.3835 mV,
-Q2 0.6179 mV.
+Q2 0.6179 mV; on the layered mesh at its default (39,681 wedges, 0.8 s and 120 MB, R-D23) 0.3842 and 0.6194 mV.
 
 Elmer is found as `K2E_ELMER` (the folder with `ElmerSolver` and `ElmerGrid`), the folder kicad2ems's installer
 recorded (`elmer` in `kicad2ems-site.toml`), or on `PATH`; a serial build with OpenMP is enough for every tool
 here. kicad2ems's `install.py` finds one, takes a folder you give (`--elmer PATH`) or builds one from source
 (`--elmer build`, kicad2ems's `tools/build_elmer.sh`: a few minutes). The mesh is solved with Elmer's direct solver (Umfpack), because the
-iterative ones diverged on thin copper. A million tetrahedra take about 3.5 GB.
+iterative ones diverged on thin copper. A million tetrahedra take about 3.5 GB (`--mesh tet`).
 
 ## Palace: S-parameters
 
