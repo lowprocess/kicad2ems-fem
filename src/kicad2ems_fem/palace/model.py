@@ -124,20 +124,33 @@ def part_lands(board):
 
 def feature_size(board):
     """The smallest feature the mesh must resolve, mm: the gap between separate copper on a layer, a port's
-    width, a slab's thickness. (A part's sheets are refined on their own: build.)"""
+    width, a slab's thickness. (A part's sheets are refined on their own: build.) Every piece's nearest neighbour
+    on its layer, through a tree (R-B21: the first 60 pieces a layer had been compared pair by pair, so a real
+    board's narrowest gap could be any other)."""
+    import shapely
     sizes = [l['z1'] - l['z0'] for l in board.layers if l['z1'] > l['z0']]
     sizes += [p.w for p in board.ports if p.w > 0]
     sizes += [abs(p.gap[1] - p.gap[0]) for p in board.ports if p.gap is not None]
     for polys in board.copper.values():
         ps = [q for g in polys for q in _polys(g)]
-        if len(ps) > 60:                            # many pieces: sample the gaps of the first ones
-            ps = ps[:60]
-        for i in range(len(ps)):
-            for j in range(i + 1, len(ps)):
-                d = ps[i].distance(ps[j])
-                if d > 1e-4:
-                    sizes.append(d)
+        if len(ps) < 2:
+            continue
+        tree = shapely.STRtree(ps)
+        (_, j), d = tree.query_nearest(ps, exclusive=True, return_distance=True, all_matches=False)
+        d = d[d > 1e-4]
+        if len(d):
+            sizes.append(float(d.min()))
     return float(min(sizes)) if sizes else 1.0
+
+
+def simplified(polys, tol):
+    """A layer's copper with its outlines straightened by up to `tol` mm (arcs and zone fills drawn in many short
+    segments: each an edge of gmsh's geometry and its fragment; R-B21), topology kept."""
+    out = []
+    for g in polys:
+        h = g.simplify(tol, preserve_topology=True).buffer(0) if tol > 0 else g
+        out.append(h if not h.is_empty else g)
+    return out
 
 
 def wall_ends(board, axis, c, t0, t1, z0, z1, snap=5e-3):
@@ -214,8 +227,10 @@ def build(board, fmax, path, margin=None, hmin=None, hmax=None, per_feature=1.0,
         lands = part_lands(board)
         reach = max(4 * hmin, 1.0)
         gnd = getattr(board, 'ground_nets', None) or ()
+        tol = min(max(feat / 20, 1e-3), 0.01)                   # the copper's outlines straightened by this
         for lay, polys in board.copper.items():                 # the copper sheets
             z = board.cu_z[lay]
+            polys = simplified(polys, tol)
             plane = ground_planes(board, lay, reach) if planes else [False] * len(polys)
             if lands.get(lay):                                  # a part's terminals join the pads they sit on
                 polys, plane = [unary_union([g.buffer(0) for g in polys] + lands[lay])], [False]

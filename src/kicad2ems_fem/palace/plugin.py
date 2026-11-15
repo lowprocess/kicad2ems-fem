@@ -83,6 +83,31 @@ class Palace(Solver):
             out.append("antenna mode: --drive (a phased drive) is not modelled, one port is driven")
         return out
 
+    # its cost, from the runs of 2026-11 (the examples on 8 ranks of an i7-13700K, order 2, 391-401 points of the
+    # adaptive sweep): unknowns about 1.53 a tetrahedron; Palace's peak memory 1.5 GB + 55 MB a thousand unknowns
+    # (within ~30 %); the sweep's time ~1.8e-5 s x tets^1.5 on 8 ranks (within x2-3: its samples follow the board)
+    UNKNOWNS_PER_TET, GB0, GB_PER_KUNKNOWN, T0 = 1.53, 1.5, 0.055, 1.8e-5
+
+    def estimate(self, run):
+        """Its rough cost (R-B21): the mesh built as the run would (gmsh, seconds), its tetrahedra scaled by the
+        runs above."""
+        import tempfile
+        from . import model
+        from .run import ranks
+        s = run.s
+        margin = s.palace_margin
+        if margin is None and getattr(run, 'antenna', False):
+            margin = ANTENNA_MARGIN * 299792458.0 / (0.5 * (run.fmin + run.fmax)) * 1e3
+        with tempfile.TemporaryDirectory() as d:
+            mdl = model.build(run.m, float(np.max(run.freq)), os.path.join(d, 'model.msh'), margin=margin,
+                              per_feature=s.palace_feature, per_wave=s.palace_wave, planes=not s.palace_fine_ground,
+                              log=lambda *a: None)
+        order = int(getattr(s, 'palace_order', 2) or 2)
+        unknowns = self.UNKNOWNS_PER_TET * mdl.tets * (order / 2) ** 3
+        return dict(seconds=self.T0 * (unknowns / self.UNKNOWNS_PER_TET) ** 1.5 * 8 / max(ranks(s.palace_np), 1),
+                    gb=self.GB0 + self.GB_PER_KUNKNOWN * unknowns / 1e3,
+                    what=f"{mdl.tets:,} tetrahedra, ~{unknowns / 1e3:.0f} k unknowns at order {order}")
+
     def deviations(self, run, prep):
         from .model import part_elements
         out = [Deviation(f'copper:{lay}', 'thickness', 'a PEC sheet of zero thickness') for lay in run.m.copper]

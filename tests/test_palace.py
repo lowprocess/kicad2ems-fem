@@ -307,3 +307,29 @@ def test_config_asks_for_mesh_refinement():
     assert 'Refinement' not in config.config(mdl, np.linspace(1e9, 2e9, 3))['Model']
     r = config.config(mdl, np.linspace(1e9, 2e9, 3), amr=2, amr_tol=5e-3)['Model']['Refinement']
     assert r == dict(MaxIts=2, Tol=5e-3, SaveAdaptIterations=False)
+
+
+def test_the_feature_size_is_every_pieces_nearest_gap_and_the_copper_is_straightened():
+    """R-B21: a layer of 100 pieces whose narrowest gap is between the last two (the first 60 had been sampled), and
+    an arc drawn in 256 segments straightened to the tolerance, its area kept."""
+    from shapely.geometry import Point
+    b = microstrip()
+    pads = [box(k * 2.0, 2.0, k * 2.0 + 1.0, 2.5) for k in range(99)] + [box(197.05, 2.0, 198.0, 2.5)]
+    b.copper = dict(b.copper, **{'F.Cu': b.copper['F.Cu'] + pads})
+    assert model.feature_size(b) == pytest.approx(0.05)
+    disc = Point(0, 0).buffer(1.0, quad_segs=64)
+    (flat,) = model.simplified([disc], 0.005)
+    assert len(flat.exterior.coords) < len(disc.exterior.coords) / 2 and flat.area == pytest.approx(disc.area, rel=1e-2)
+
+
+def test_the_estimate_is_its_mesh_scaled_by_the_runs():
+    """R-B21: Palace's estimate builds the mesh as the run would and scales its tetrahedra by the examples' runs."""
+    from kicad2ems_fem.palace.plugin import Palace
+    pl = Palace()
+    s = SimpleNamespace(palace_margin=None, palace_feature=4.0, palace_wave=8.0, palace_fine_ground=False, palace_order=2,
+                        palace_np=8)
+    run_ = SimpleNamespace(m=microstrip(), s=s, freq=np.array([1e9, 10e9]), fmin=1e9, fmax=10e9, antenna=False)
+    e = pl.estimate(run_)
+    tets = int(e['what'].split()[0].replace(',', ''))
+    assert tets > 100 and e['gb'] == pytest.approx(pl.GB0 + pl.GB_PER_KUNKNOWN * pl.UNKNOWNS_PER_TET * tets / 1e3)
+    assert e['seconds'] == pytest.approx(pl.T0 * tets ** 1.5) and 'order 2' in e['what']
