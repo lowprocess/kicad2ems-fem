@@ -206,7 +206,9 @@ class ElmerThermal(_Fem):
             return []
         return [dict(name='hottest', value=float(r['T_max']), unit='C')] + \
                [dict(name=ref, value=float(t), unit='C') for ref, t in (r.get('parts') or {}).items()] + \
-               ([dict(name='coolest', value=float(r['T_min']), unit='C')] if isinstance(r.get('T_min'), (int, float)) else [])
+               ([dict(name='coolest', value=float(r['T_min']), unit='C')] if isinstance(r.get('T_min'), (int, float)) else []) + \
+               [dict(name=f"{ref} to 63 %", value=float(t63), unit='s')
+                for ref, t63 in ((r.get('transient') or {}).get('to_63_s') or {}).items()]
 
     def report(self, folder):
         r = self._read(folder)
@@ -223,10 +225,20 @@ class ElmerThermal(_Fem):
             sections.append(dict(title='Current', table=dict(
                 columns=['load', 'drop, warm (mV)', 'drop, cold (mV)'],
                 rows=[[ref, mv, r['drop_ambient_mV'][ref]] for ref, mv in r['drop_mV'].items()], formats=[None, '.4f', '.4f'])))
-        picture = os.path.join(folder, 'thermal.png')
+        tr = r.get('transient')
+        if tr:                                                   # (R-E21: --transient)
+            sections.append(dict(title=f"Heating from cold, to {tr['end_s']:g} s",
+                                 text="The parts' heat on at 0 s, the board at the air's temperature before; the "
+                                      "board's own heat capacity, not the parts' bodies'. When each part's pads are "
+                                      "63 % of the way to their steady temperature:",
+                                 table=dict(columns=['part', 'to 63 % (s)'],
+                                            rows=[[ref, t63] for ref, t63 in sorted(tr['to_63_s'].items(),
+                                                                                    key=lambda kv: kv[1])],
+                                            formats=[None, '.4g'])))
+        images = [os.path.join(folder, f) for f in ('thermal.png', 'thermal-transient.png')]
         return dict(title=f"Temperature: hottest {r['T_max']:.1f} °C", sections=sections,
                     notes=["A part's heat all enters the board: its pad temperature is an upper bound."],
-                    images=[picture] if os.path.exists(picture) else [],
+                    images=[f for f in images if os.path.exists(f)],
                     footer=f"Elmer, {r['wedges']:,} wedges, {_seconds(r):.1f} s")
 
 

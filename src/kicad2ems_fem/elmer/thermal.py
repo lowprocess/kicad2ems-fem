@@ -39,6 +39,9 @@ from .layered import BARREL, BARREL_E, BOARD, COPPER, COPPER_E, layered_mesh
 from .model import SIGMA_CU
 
 K_CU = 385.0                    # W/m/K
+RHO_CU, C_CU = 8960.0, 385.0    # kg/m3, J/kg/K: 3.45e6 J/m3/K, pcbqs's RHO_C_CU
+RHO_FR4, C_FR4 = 1850.0, 1081.0 # 2.0e6 J/m3/K, pcbqs's RHO_C_FR4
+STEPS, DECADES = 40, 4          # a transient's steps a decade, from its end / 10^(DECADES - 1): pcbqs's
 K_BOARD = (0.8, 0.3)            # FR-4 along the glass weave and through it
 ALPHA_CU = 0.00393              # per K, about 20 C
 PLATING = 0.025
@@ -63,10 +66,25 @@ def part_pads(board, spec):
     return out
 
 
-def sif(m, heat=None, loads=None, htc=10.0, ambient=25.0, k_board=K_BOARD, plating=PLATING, max_iterations=20):
+def steps(seconds):
+    """A transient's time steps (s): DECADES decades to `seconds`, STEPS equal steps in each, the first from 0 (as
+    pcbqs's grid transient takes them, so the two compare step for step)."""
+    first, out, t = seconds / 10 ** (DECADES - 1), [], 0.0
+    for k in range(DECADES):
+        end = first * 10 ** k
+        out += [(end - t) / STEPS] * STEPS
+        t = end
+    return out
+
+
+def sif(m, heat=None, loads=None, htc=10.0, ambient=25.0, k_board=K_BOARD, plating=PLATING, max_iterations=20,
+        transient=None):
     """The .sif. m: layered_mesh's description, its boundaries named 'P:<part>' (heated), 'I:source' and 'I:<load>'.
-    heat: {part: W}; loads: {ref: A} (None: no current)."""
+    heat: {part: W}; loads: {ref: A} (None: no current). transient (s): the board heating from the ambient over
+    that long instead (R-E21; heat only), BDF2 on steps(), the hottest point and each part's pads saved each step."""
     heat, electric = heat or {}, loads is not None
+    if transient and electric:
+        raise ValueError("a transient takes the parts' heat only, not a net's current")
     r = m['via_r']
     fill = float(np.mean((r ** 2 - np.maximum(r - plating, 0) ** 2) / r ** 2))
     temps = np.arange(-60.0, 401.0, 20.0)
@@ -74,13 +92,15 @@ def sif(m, heat=None, loads=None, htc=10.0, ambient=25.0, k_board=K_BOARD, plati
                         ''.join(f'      {t:g} {s0 / (1 + ALPHA_CU * (t - 20.0)):.6g}\n' for t in temps) + "    End")
     mats = {COPPER_E: (K_CU, SIGMA_CU), BARREL_E: (K_CU * fill, SIGMA_CU * fill), COPPER: (K_CU, None),
             BARREL: (K_CU * fill, None), BOARD: (None, None)}
+    rho_c = {COPPER_E: (RHO_CU, C_CU), BARREL_E: (RHO_CU * fill, C_CU), COPPER: (RHO_CU, C_CU),
+             BARREL: (RHO_CU * fill, C_CU), BOARD: (RHO_FR4, C_FR4)}          # (a barrel's: its plating's share)
     bodies = materials = ''
     for i, b in enumerate(m['bodies']):
         on = electric and b in (COPPER_E, BARREL_E)
         bodies += (f"Body {i + 1}\n  Name = \"{NAMES[b]}\"\n  Target Bodies(1) = {b}\n  Equation = {1 if on or not electric else 2}\n"
                    f"  Material = {i + 1}\n  Initial Condition = 1\n{'  Body Force = 1' + chr(10) if on else ''}End\n")
         k, s = mats[b]
-        materials += f"Material {i + 1}\n  Density = 1.0\n  Heat Capacity = 1.0\n"
+        materials += f"Material {i + 1}\n  Density = {rho_c[b][0]:.6g}\n  Heat Capacity = {rho_c[b][1]:.6g}\n"
         materials += (f"  Heat Conductivity = {k:.6g}\n" if k else
                       f"  Heat Conductivity(3) = {k_board[0]:g} {k_board[0]:g} {k_board[1]:g}\n")
         if on:
@@ -97,6 +117,10 @@ def sif(m, heat=None, loads=None, htc=10.0, ambient=25.0, k_board=K_BOARD, plati
         q = sum(heat[n[2:]] / area[n] for n in names if n.startswith('P:'))
         if q:
             bcs += f"  Heat Flux = {q:.9g}\n"
+        if transient:
+            for j, spec in enumerate(heat):
+                if f'P:{spec}' in names:
+                    bcs += f"  part{j} = Logical True\n"
         for n in names:
             if not electric or not n.startswith('I:'):
                 continue
@@ -134,6 +158,28 @@ Body Force 1
 End
 """ if electric else ''
     first = 1 if electric else 0                                 # the solvers run in their numbers' order
+    record = ''
+    if transient:                                                # each step: the hottest point, each part's pads
+        record = (f'Solver {first + 2}\n  Exec Solver = After Timestep\n  Equation = "SaveScalars"\n'
+                  '  Procedure = "SaveData" "SaveScalars"\n  Filename = "transient.dat"\n'
+                  '  Variable 1 = Temperature\n  Operator 1 = max\n')
+        for j, spec in enumerate(heat):
+            record += (f'  Variable {j + 2} = Temperature\n  Operator {j + 2} = boundary int mean\n'
+                       f'  Mask Name {j + 2} = part{j}\n')
+        record += 'End\n'
+        dts = steps(transient)
+        simulation = ('  Simulation Type = Transient\n  Timestepping Method = BDF\n  BDF Order = 2\n'
+                      f'  Timestep Intervals({len(dts)}) = {" ".join("1" for _ in dts)}\n'
+                      f'  Timestep Sizes({len(dts)}) = {" ".join(f"{d:.9g}" for d in dts)}\n'
+                      '  Steady State Max Iterations = 1\n')
+        output = ''
+    else:
+        simulation = (f'  Simulation Type = Steady State\n'
+                      f'  Steady State Max Iterations = {max_iterations if electric else 1}\n')
+        output = (f'Solver {first + 2}\n  Exec Solver = After All\n  Equation = "ResultOutput"\n'
+                  '  Procedure = "ResultOutputSolve" "ResultOutputSolver"\n  Output Directory = "."\n'
+                  '  Output File Name = "case"\n  Vtu Format = Logical True\n  Ascii Output = Logical True\n'
+                  '  Save Geometry Ids = Logical True\nEnd\n')
     equations = ("Equation 1\n  Active Solvers(2) = 1 2\nEnd\nEquation 2\n  Active Solvers(1) = 2\nEnd\n" if electric
                  else "Equation 1\n  Active Solvers(1) = 1\nEnd\n")
     return f"""Header
@@ -142,9 +188,7 @@ End
 Simulation
   Coordinate System = Cartesian 3D
   Coordinate Scaling = 1.0e-3
-  Simulation Type = Steady State
-  Steady State Max Iterations = {max_iterations if electric else 1}
-  Max Output Level = 4
+{simulation}  Max Output Level = 4
 End
 {bodies}{equations}Initial Condition 1
   Temperature = {ambient:g}
@@ -159,17 +203,7 @@ End
   Linear System Direct Method = "Umfpack"
   Steady State Convergence Tolerance = 1.0e-6
 End
-Solver {first + 2}
-  Exec Solver = After All
-  Equation = "ResultOutput"
-  Procedure = "ResultOutputSolve" "ResultOutputSolver"
-  Output Directory = "."
-  Output File Name = "case"
-  Vtu Format = Logical True
-  Ascii Output = Logical True
-  Save Geometry Ids = Logical True
-End
-{bcs}"""
+{output}{record}{bcs}"""
 
 
 def read_vtu(path, name):
@@ -212,10 +246,15 @@ def circuit_heat(board, path, duty=1.0):
 
 
 def solve(board, out='thermal', heat=None, nets=None, source=None, loads=None, copper=None, htc=10.0, ambient=25.0,
-          h=0.3, hmax=2.0, crop=None, k_board=K_BOARD, plating=PLATING, log=print):
+          h=0.3, hmax=2.0, crop=None, k_board=K_BOARD, plating=PLATING, log=print, transient=0.0):
     """The board's temperatures. heat: {REF or REF.PAD: W}; nets, source, loads: the net that carries current (as
-    dc.solve), or none; copper: the other nets kept (None: all the board's). Returns the dict written to
-    <out>/thermal.json."""
+    dc.solve), or none; copper: the other nets kept (None: all the board's). transient (s): also the heating from
+    the ambient over that long (heat only; R-E21), <out>/thermal-transient.json, and its summary in the result's
+    `transient`. Returns the dict written to <out>/thermal.json."""
+    if transient and (nets or loads or source):
+        raise ValueError("--transient takes the parts' heat only, not a net's current")
+    if transient and transient < 0:
+        raise ValueError('--transient: seconds, positive')
     ok, why = elmer.found()
     if not ok:
         raise RuntimeError(why)
@@ -277,6 +316,22 @@ def solve(board, out='thermal', heat=None, nets=None, source=None, loads=None, c
                       iterations=len(rows))
     put = joule + sum(heat.values())
     result['balance'] = dict(in_W=put, out_W=given, error=(given - put) / put if put else 0.0)
+    if transient:
+        t = time.perf_counter()
+        elmer.solve(case, sif(m, heat, None, htc=htc, ambient=ambient, k_board=k_board, plating=plating,
+                              transient=transient))
+        tr = _transient(case / 'transient.dat', transient, heat, result, ambient)
+        tr['seconds'] = round(time.perf_counter() - t, 1)
+        (out / 'thermal-transient.json').write_text(json.dumps(tr, indent=1))
+        try:
+            transient_picture(out / 'thermal-transient.png', tr, ambient)
+        except Exception as exc:                                 # the numbers stand without the picture
+            log(f'no transient picture: {exc}')
+        result['transient'] = dict(end_s=transient, to_63_s=tr['to_63_s'], T_max_end=tr['T_max'][-1],
+                                   seconds=tr['seconds'])
+        result['seconds']['transient'] = tr['seconds']
+        log(f"transient: {len(tr['times_s']) - 1} steps to {transient:g} s, {tr['seconds']:.0f} s; the hottest point "
+            f"{tr['T_max'][-1]:.1f} C at the end (steady {result['T_max']:.1f} C)")
     (out / 'thermal.json').write_text(json.dumps(result, indent=1))
     np.savez_compressed(out / 'thermal.npz', T=T, nodes=m['nodes'], xy=m['xy'], tri=m['tri'], node=m['node'])
     try:
@@ -284,6 +339,51 @@ def solve(board, out='thermal', heat=None, nets=None, source=None, loads=None, c
     except Exception as exc:                                     # the numbers stand without the picture
         log(f'no picture: {exc}')
     return result
+
+
+def _transient(path, end, heat, steady, ambient):
+    """The transient run's record (transient.dat: a row a step, the hottest point then each part's pads) as
+    dict(times_s, T_max, parts={spec: [C]}, to_63_s={spec: s}): 0 s is the ambient, before the heat; to_63_s when
+    a part's pads are 63 % of the way to their steady temperature (pcbqs's grid transient reports the same)."""
+    rows = np.loadtxt(path, ndmin=2)
+    dts = steps(end)
+    if len(rows) != len(dts):
+        raise RuntimeError(f"Elmer's transient record has {len(rows)} steps, not {len(dts)}")
+    times = np.r_[0.0, np.cumsum(dts)]
+    tmax = np.r_[ambient, rows[:, 0]]
+    parts, to63 = {}, {}
+    for j, spec in enumerate(heat):
+        c = np.r_[ambient, rows[:, j + 1]]
+        parts[spec] = c.tolist()
+        target = ambient + 0.632 * (steady['parts'][spec] - ambient)
+        hit = int(np.argmax(c >= target)) if (c >= target).any() else 0
+        if hit:
+            a, b = c[hit - 1], c[hit]
+            to63[spec] = float(times[hit - 1] + (times[hit] - times[hit - 1]) * (target - a) / max(b - a, 1e-12))
+    return dict(times_s=times.tolist(), T_max=tmax.tolist(), parts=parts, to_63_s=to63, end_s=end,
+                steady=dict(T_max=steady['T_max'], parts=steady['parts']))
+
+
+def transient_picture(path, tr, ambient):
+    """Each part's pads and the hottest point against time (log), the steady values dashed."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    t = np.array(tr['times_s'])
+    fig, ax = plt.subplots(figsize=(7, 4.2), dpi=110)
+    ax.semilogx(t[1:], tr['T_max'][1:], 'k', lw=1.4, label='hottest point')
+    for spec, c in tr['parts'].items():
+        line, = ax.semilogx(t[1:], c[1:], lw=1.2, label=spec)
+        ax.axhline(tr['steady']['parts'][spec], color=line.get_color(), ls='--', lw=0.7)
+    ax.axhline(ambient, color='0.6', lw=0.7)
+    ax.set_xlabel('time (s)')
+    ax.set_ylabel('temperature (°C)')
+    ax.set_title('Heating from the ambient (Elmer); steady dashed')
+    ax.grid(True, which='both', alpha=0.3)
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
 
 
 def picture(path, m, T, result, board=None):
@@ -359,6 +459,9 @@ def parser():
     ap.add_argument('--h', type=float, default=0.3, help='mesh size in the copper with current and at pads, mm (default 0.3)')
     ap.add_argument('--hmax', type=float, default=2.0, help='mesh size elsewhere, mm (default 2)')
     ap.add_argument('--plating', type=float, default=PLATING, help='via plating, mm (default 0.025)')
+    ap.add_argument('--transient', type=float, default=0.0,
+                    help="s: also the heating from the ambient over this long, the parts' heat on at 0 (no net's "
+                         "current): thermal-transient.json")
     return ap
 
 
@@ -382,7 +485,7 @@ def main(argv=None):
         r = solve(board, a.out, heat=heat, nets=set(a.net or []), source=a.source, loads=loads, copper=a.copper,
                   htc=a.htc, ambient=a.ambient, h=a.h, hmax=a.hmax, plating=a.plating,
                   crop=box(*[float(v) for v in a.region.split(',')]) if a.region else None,
-                  k_board=tuple(float(v) for v in a.k_board.split(',')), log=say)
+                  k_board=tuple(float(v) for v in a.k_board.split(',')), log=say, transient=a.transient)
     except (ValueError, RuntimeError) as exc:
         print(f'fem thermal: error: {exc}', file=sys.stderr)
         return 2
@@ -394,6 +497,8 @@ def main(argv=None):
         say(f"{ref}: {mv:.4f} mV ({r['drop_ambient_mV'][ref]:.4f} mV with the copper at the air's temperature)")
     if 'loss_W' in r:
         say(f"{r['loss_W'] * 1e3:.4f} mW in the copper that carries the current")
+    for ref, t63 in (r.get('transient') or {}).get('to_63_s', {}).items():
+        say(f"{ref}: 63 % of its rise at {t63:.4g} s")
     b = r['balance']
     say(f"{b['in_W']:.4g} W in, {b['out_W']:.4g} W to the air ({b['error'] * 100:+.2f}%); {r['wedges']:,} wedges; "
         f"wrote {Path(a.out) / 'thermal.json'}")

@@ -250,6 +250,23 @@ python -m kicad2ems_fem.elmer.thermal board.kicad_pcb --net VHB --source L3 --lo
   (`elmer/layered.py`): one element through each copper layer, where tetrahedra would need millions. `--h`
   (default 0.3 mm) in the copper with current and at pads, `--hmax` (2 mm) elsewhere.
 
+**Heating from cold** (`--transient S`, seconds; parts' heat only, not a net's current). After the steady run,
+the board heats from the ambient with the parts' heat on at 0 s: Elmer's BDF2 on pcbqs's own steps (40 a
+decade, over 4 decades to S), each part's pads and the hottest point recorded each step, the board's own heat
+capacity (copper 3.45, laminate 2.0 MJ/m³/K; not the parts' bodies'). `<out>/thermal-transient.json` (the
+curves, each part's time to 63 % of its rise), `thermal-transient.png`, and the report's *Heating from cold*.
+
+| Check | Result |
+|---|---|
+| A 10 mm square on a 0.2 mm board, heated over its whole top, against one lump (C / hA = 24.87 s) | 63 % at 24.81 s, the curve within 2% at 0.3, 1 and 3 time constants |
+| wpthb, 0.3 W in each FET and 0.4 W in L3, to 2000 s, against pcbqs's grid (`pcbqs/validation/thermal_elmer.py --transient`) | 63 % at 82, 85, 90 s (Q1, L3, Q2); pcbqs 89, 88, 97 s (+3 to +9%), within 0.5 K at 200 s. 331,000 wedges, 15 min |
+
+The wpthb run found pcbqs's grid counting an inner layer's copper as laminate too (its laminate share took the
+layer's own thickness): 4.8% too much heat capacity, its parts 13% late, now 3 to 9% (pcbqs, R-E21). Elmer's
+direct solver refactors at each of the 160 steps, ~5.5 s each there (keeping its factors, `Linear System
+Refactorize = False`, changed nothing); an iterative one (CG, ILU0) took ten times as long on the board's thin
+wedges.
+
 It is the steady temperature for the mean power: right when the on and off times are short beside the seconds
 a part's copper takes to warm. Left out: the parts' own bodies (all a part's heat enters the board, so pad
 temperatures are upper bounds), solder mask, heat taken by connectors and wires, air flow other than as `--htc`,

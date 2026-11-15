@@ -1,5 +1,7 @@
 """The thermal tool: the layered mesh and the .sif without Elmer; a fin and a warm strip against their equations
 with."""
+import json
+
 import numpy as np
 import pytest
 from shapely.geometry import box, mapping
@@ -155,3 +157,34 @@ def test_duty_on_the_command_line_is_the_mean(capsys):
     assert thermal._pairs(ap, ['Q1=2@0.25', 'Q2.5=0.3'], '--heat', 'WATTS') == {'Q1': 0.5, 'Q2.5': 0.3}
     with pytest.raises(SystemExit):
         thermal._pairs(ap, ['Q1=2@1.5'], '--heat', 'WATTS')
+
+
+def test_a_transient_takes_pcbqs_steps_and_the_parts_heat_only():
+    dts = thermal.steps(100.0)
+    assert len(dts) == thermal.STEPS * thermal.DECADES and sum(dts) == pytest.approx(100.0)
+    assert sum(dts[:thermal.STEPS]) == pytest.approx(0.1)                 # the first decade to end / 1000
+    m = dict(bodies=[thermal.COPPER, thermal.BOARD], via_r=np.array([0.15]), boundaries={1: (['P:S'], 1.0)})
+    s = thermal.sif(m, heat={'S': 0.1}, transient=100.0)
+    assert 'Simulation Type = Transient' in s and 'BDF Order = 2' in s and 'part0 = Logical True' in s
+    assert 'Exec Solver = After Timestep' in s and 'ResultOutput' not in s and 'Density = 8960' in s
+    with pytest.raises(ValueError):
+        thermal.sif(m, heat={'S': 0.1}, loads={'L': 1.0}, transient=100.0)
+
+
+@needs_elmer
+def test_a_small_board_heats_as_one_lump(tmp_path):
+    """R-E21: a 10 mm square strip heated over its whole top, its conduction (~1 s) quick beside its convection
+    (C / hA ~25 s): its pads reach 63 % of their rise at C / hA. An outer layer's copper-free cell is not board (the
+    mesh leaves it out), so C is the copper and the core alone."""
+    L, w, tb, tc, Q, htc = 10.0, 10.0, 0.2, 0.035, 0.05, 10.0
+    A = L * w * 1e-6
+    C = A * (thermal.RHO_CU * thermal.C_CU * tc + thermal.RHO_FR4 * thermal.C_FR4 * tb) * 1e-3
+    hA = htc * (2 * A + 2 * (L + w) * 1e-3 * (tb + tc) * 1e-3)
+    r = thermal.solve(strip(L, w, tb, tc, parts=(('S', 0.0, L),)), tmp_path, heat={'S': Q}, htc=htc, h=0.5, hmax=1.0,
+                      log=lambda *_: None, transient=10 * C / hA)
+    assert r['parts']['S'] - 25.0 == pytest.approx(Q / hA, rel=0.01)
+    assert r['transient']['to_63_s']['S'] == pytest.approx(C / hA, rel=0.01)
+    tr = json.loads((tmp_path / 'thermal-transient.json').read_text())
+    t, c = np.array(tr['times_s']), np.array(tr['parts']['S']) - 25.0
+    for k in (0.3, 1.0, 3.0):                                     # the lump's curve, its steady rise Elmer's
+        assert np.interp(k * C / hA, t, c) == pytest.approx((r['parts']['S'] - 25.0) * (1 - np.exp(-k)), rel=0.02)
