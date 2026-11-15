@@ -297,3 +297,13 @@ def test_read_incident_power(tmp_path):
             f'               Im{{{q}[1]}} ({unit})\n2.4,{v}\n')
     f, p = run.read_incident(str(tmp_path), 1)
     assert f.tolist() == [2.4e9] and p[0] == pytest.approx(1.0)
+
+
+def test_config_asks_for_mesh_refinement():
+    """--palace-amr N (R-E3): Palace's Model.Refinement, N passes to the error estimate's tolerance; none by
+    default."""
+    mdl = model.Model('w/model.msh', [(1, 3.5, 0.002)], model.AIR, model.PEC, model.ABSORB,
+                      [dict(attr=201, index=1, R=50.0, direction='+Z', name='P1')], 0.1, 1.0, 5.0)
+    assert 'Refinement' not in config.config(mdl, np.linspace(1e9, 2e9, 3))['Model']
+    r = config.config(mdl, np.linspace(1e9, 2e9, 3), amr=2, amr_tol=5e-3)['Model']['Refinement']
+    assert r == dict(MaxIts=2, Tol=5e-3, SaveAdaptIterations=False)

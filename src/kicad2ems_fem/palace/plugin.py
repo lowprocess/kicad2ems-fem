@@ -64,6 +64,11 @@ class Palace(Solver):
                gui='Palace processes', group=G),
         Option('palace_loss', False, "copper loss: the sheets as Palace's finite-thickness conductivity boundary "
                "instead of PEC (good to ~10 MHz; high above)", bool, name='loss', gui='Palace copper loss', group=G),
+        Option('palace_amr', 0, "passes of Palace's adaptive mesh refinement: the cells where its error estimate is "
+               "largest split, until it is below --palace-amr-tol (default {default}: none)", int, name='amr',
+               gui='Palace mesh refinement passes', group=G, cli=dict(metavar='N')),
+        Option('palace_amr_tol', 1e-2, "the adaptive mesh refinement's error estimate to stop at (default {default})",
+               float, name='amr_tol', group=G),
         Option('palace_fine_ground', False, "the feature size at the ground's edges too: the ground planes' own edges, "
                "the vias on ground nets (then round) and the edge walls. Several times the mesh", bool,
                name='fine_ground', gui='Palace fine mesh at the ground', group=G),
@@ -106,7 +111,8 @@ class Palace(Solver):
         from kicad2ems.api.solver import mixed_mode
         from . import config, run as prun
         s, work, mdl = run.s, prep['work'], prep['model']
-        cfg = config.config(mdl, run.freq, order=s.palace_order, tol=s.palace_tol, loss=bool(s.palace_loss))
+        cfg = config.config(mdl, run.freq, order=s.palace_order, tol=s.palace_tol, loss=bool(s.palace_loss),
+                            amr=getattr(s, 'palace_amr', 0) or 0, amr_tol=getattr(s, 'palace_amr_tol', 1e-2))
         with open(os.path.join(work, 'palace.json'), 'w') as fh:
             json.dump(cfg, fh, indent=1)
         t = time.time()

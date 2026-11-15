@@ -18,7 +18,7 @@ LINEAR = dict(ComplexCoarseSolve=True, EstimatorTol=1e-2)
 
 
 def config(mdl, freq, order=2, tol=1e-3, out='postpro', verbose=2, max_samples=40, loss=False, sigma=5.8e7,
-           plating=0.025, excite=None, farfield=None):
+           plating=0.025, excite=None, farfield=None, amr=0, amr_tol=1e-2):
     """loss: the copper as Palace's finite-thickness conductivity boundary (each layer's sheets their thickness,
     two-sided; the via walls one-sided, the plating thick) instead of PEC. Against FastHenry's volume filaments on
     a 20 x 10 mm strip loop this gave R within 1% at 1 MHz, 5% at 10 MHz and 30% high at 100 MHz (a zero-thickness
@@ -26,7 +26,9 @@ def config(mdl, freq, order=2, tol=1e-3, out='postpro', verbose=2, max_samples=4
 
     excite: the ports driven (0-based, board order), each in its own solve; default all, the whole S matrix.
     farfield: (n, 2) angles (theta, phi in degrees) at which Palace writes the far field r E of each solve, from
-    the fields on the air box's faces (farfield-rE.csv)."""
+    the fields on the air box's faces (farfield-rE.csv). amr: passes of Palace's adaptive mesh refinement (its
+    Model.Refinement: the cells where its error estimate is largest split, until the estimate is below amr_tol;
+    0: none; R-E3: it had never been used)."""
     f = np.asarray(freq, float) / 1e9                       # GHz
     driven_ports = set(range(len(mdl.ports))) if excite is None else {int(k) for k in excite}
     ports = []
@@ -55,7 +57,9 @@ def config(mdl, freq, order=2, tol=1e-3, out='postpro', verbose=2, max_samples=4
             Attributes=[mdl.absorb], ThetaPhis=[[float(t), float(p)] for t, p in np.asarray(farfield, float)]))
     return {
         'Problem': dict(Type='Driven', Verbose=verbose, Output=out),
-        'Model': dict(Mesh=mdl.path.rsplit('/', 1)[-1], L0=1e-3),
+        'Model': dict(Mesh=mdl.path.rsplit('/', 1)[-1], L0=1e-3,
+                      **({'Refinement': dict(MaxIts=int(amr), Tol=float(amr_tol), SaveAdaptIterations=False)}
+                         if amr else {})),
         'Domains': dict(Materials=materials),
         'Boundaries': boundaries,
         'Solver': dict(Order=order, Device='CPU', Driven=driven,

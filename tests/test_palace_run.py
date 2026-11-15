@@ -63,3 +63,18 @@ def test_a_grounded_box_takes_some_of_the_charge(tmp_path):
     g = C['ground']
     assert g[0, 1] == pytest.approx(g[1, 0], rel=1e-3) and g[0, 0] > -g[0, 1] > 0 and g[1, 1] > -g[0, 1]
     assert 0.85 < g[0, 1] / C['open'][0, 1] < 0.99
+
+
+def test_mesh_refinement_runs_and_keeps_the_answer(tmp_path):
+    """One pass of Palace's adaptive mesh refinement (--palace-amr, R-E3) on the series arm: it runs, writes its
+    error estimate, and the arm is still its circuit value."""
+    b = with_part(R=20.0, L=8.2e-9)
+    b.layers[0]['tand'] = 0.0
+    mdl = model.build(b, 2e9, str(tmp_path / 'model.msh'), log=quiet)
+    with open(tmp_path / 'palace.json', 'w') as fh:
+        json.dump(config.config(mdl, [0.1e9, 0.2e9], tol=0, amr=1), fh)
+    run.run(str(tmp_path), 'palace.json', log=quiet)
+    assert (tmp_path / 'postpro' / 'error-indicators.csv').is_file()
+    f, S = run.read_s(str(tmp_path / 'postpro'), 2)
+    Y = np.linalg.inv(50 * (np.eye(2) + S[0]) @ np.linalg.inv(np.eye(2) - S[0]))
+    assert (-1 / Y[1, 0]).real == pytest.approx(20.0, rel=0.02)
