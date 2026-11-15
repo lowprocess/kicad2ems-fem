@@ -328,7 +328,10 @@ def test_the_estimate_is_its_mesh_scaled_by_the_runs():
     pl = Palace()
     s = SimpleNamespace(palace_margin=None, palace_feature=4.0, palace_wave=8.0, palace_fine_ground=False, palace_order=2,
                         palace_np=8)
-    run_ = SimpleNamespace(m=microstrip(), s=s, freq=np.array([1e9, 10e9]), fmin=1e9, fmax=10e9, antenna=False)
+    run_ = SimpleNamespace(m=microstrip(), s=s, freq=np.array([1e9, 10e9]), fmin=1e9, fmax=10e9, antenna=False,
+                           plan=['openems'])
+    assert pl.estimate(run_) is None                                   # not in the run: no mesh built for it
+    run_.plan = ['palace']
     e = pl.estimate(run_)
     tets = int(e['what'].split()[0].replace(',', ''))
     assert tets > 100 and e['gb'] == pytest.approx(pl.GB0 + pl.GB_PER_KUNKNOWN * pl.UNKNOWNS_PER_TET * tets / 1e3)

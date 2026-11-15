@@ -20,6 +20,34 @@ G = 'palace'
 ANTENNA_MARGIN = 0.5            # antenna mode's air around the board, wavelengths at the band centre
 
 
+class _quiet:
+    """stdout and stderr at the descriptors to /dev/null, C's buffers flushed on both sides: TetGen prints past
+    gmsh's General.Terminal, and what sat in C's buffer had reached the next redirect of them."""
+
+    def __enter__(self):
+        import ctypes
+        import sys
+        self.libc = ctypes.CDLL(None) if os.name != 'nt' else None
+        for f in (sys.stdout, sys.stderr):
+            f.flush()
+        if self.libc is not None:
+            self.libc.fflush(None)
+        self.saved = [os.dup(1), os.dup(2)]
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 1)
+        os.dup2(null, 2)
+        os.close(null)
+        return self
+
+    def __exit__(self, *exc):
+        if self.libc is not None:
+            self.libc.fflush(None)
+        for fd, keep in zip((1, 2), self.saved):
+            os.dup2(keep, fd)
+            os.close(keep)
+        return False
+
+
 def palace_status():
     from .run import launcher
     how = launcher()
@@ -90,15 +118,18 @@ class Palace(Solver):
 
     def estimate(self, run):
         """Its rough cost (R-B21): the mesh built as the run would (gmsh, seconds), its tetrahedra scaled by the
-        runs above."""
+        runs above. Only for a run that has it (a preview estimates every solver: the mesh is seconds to minutes),
+        gmsh's own output kept out of the run's."""
         import tempfile
         from . import model
         from .run import ranks
+        if self.name not in [*(getattr(run, 'plan', None) or ()), *(getattr(run, 'previewed', None) or ())]:
+            return None
         s = run.s
         margin = s.palace_margin
         if margin is None and getattr(run, 'antenna', False):
             margin = ANTENNA_MARGIN * 299792458.0 / (0.5 * (run.fmin + run.fmax)) * 1e3
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory() as d, _quiet():
             mdl = model.build(run.m, float(np.max(run.freq)), os.path.join(d, 'model.msh'), margin=margin,
                               per_feature=s.palace_feature, per_wave=s.palace_wave, planes=not s.palace_fine_ground,
                               log=lambda *a: None)
