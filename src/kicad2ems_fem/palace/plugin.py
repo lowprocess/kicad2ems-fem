@@ -102,6 +102,11 @@ class Palace(Solver):
                gui='Palace mesh refinement passes', group=G, cli=dict(metavar='N')),
         Option('palace_amr_tol', 1e-2, "the adaptive mesh refinement's error estimate to stop at (default {default})",
                float, name='amr_tol', group=G),
+        Option('palace_amr_max', 0, "the unknowns past which the mesh refinement stops (default {default}: what "
+               "the memory available holds, by the runs' memory per unknown)", int, name='amr_max', group=G),
+        Option('palace_abc', 1, "the absorbing boundary's order, 1 or 2 (default {default}; 2 takes the field's "
+               "curvature on the faces too)", int, name='abc', choices=(1, 2),
+               gui='Palace absorbing boundary order', group=G),
         Option('palace_box', 'absorbing', "the air box's faces: absorbing (the board in free space) or pec (a closed "
                "metal can, --palace-margin its distance from the board on every side)", str, name='box',
                choices=('absorbing', 'pec'), gui='Palace box', group=G),
@@ -130,9 +135,11 @@ class Palace(Solver):
         return out
 
     # its cost, from the runs of 2026-11 (the examples on 8 ranks of an i7-13700K, order 2, 391-401 points of the
-    # adaptive sweep): unknowns about 1.53 a tetrahedron; Palace's peak memory 1.5 GB + 55 MB a thousand unknowns
-    # (within ~30 %); the sweep's time ~1.8e-5 s x tets^1.5 on 8 ranks (within x2-3: its samples follow the board)
-    UNKNOWNS_PER_TET, GB0, GB_PER_KUNKNOWN, T0 = 1.53, 1.5, 0.055, 1.8e-5
+    # adaptive sweep): Palace's own count of unknowns about 6.9 a tetrahedron (rf_shielded: 812,932 for 118,491;
+    # 164,788 for 23,358; 1.53 had been taken, which the memory's constant had been fitted with: R-E20 caps the
+    # mesh refinement in Palace's unknowns); its peak memory 1.5 GB + 12 MB a thousand unknowns (within ~30 %); the
+    # sweep's time ~1.8e-5 s x tets^1.5 on 8 ranks (within x2-3: its samples follow the board)
+    UNKNOWNS_PER_TET, GB0, GB_PER_KUNKNOWN, T0 = 6.9, 1.5, 0.0122, 1.8e-5
 
     def estimate(self, run):
         """Its rough cost (R-B21): the mesh built as the run would (gmsh, seconds), its tetrahedra scaled by the
@@ -187,7 +194,7 @@ class Palace(Solver):
         s, work, mdl = run.s, prep['work'], prep['model']
         box = getattr(s, 'palace_box', None) or 'absorbing'
         cfg = config.config(mdl, run.freq, order=s.palace_order, tol=s.palace_tol, loss=bool(s.palace_loss),
-                            amr=getattr(s, 'palace_amr', 0) or 0, amr_tol=getattr(s, 'palace_amr_tol', 1e-2), box=box)
+                            box=box, abc=int(getattr(s, 'palace_abc', 1) or 1), **self._amr(run))
         with open(os.path.join(work, 'palace.json'), 'w') as fh:
             json.dump(cfg, fh, indent=1)
         t = time.time()
@@ -214,6 +221,25 @@ class Palace(Solver):
         return Result(S, names, zref, seconds + prep['mesh_s'], info=info,
                       comment=f"Palace FEM, order {s.palace_order}, {mdl.tets} tets ({run.name})")
 
+    def _amr(self, run):
+        """The mesh refinement's settings for config(): its passes, tolerance and the unknowns it stops at, by
+        default what 70 % of the memory available holds at the runs' 55 MB a thousand unknowns (R-E20: a pass
+        can double the mesh, and the machine's memory had been the only limit)."""
+        s = run.s
+        amr = int(getattr(s, 'palace_amr', 0) or 0)
+        if not amr:
+            return dict(amr=0)
+        cap = int(getattr(s, 'palace_amr_max', 0) or 0)
+        if not cap:
+            try:
+                from emsdev.memory import available
+                gb = available() / 1e9
+                cap = max(int((0.7 * gb - self.GB0) / self.GB_PER_KUNKNOWN * 1e3), 10000)
+                run.log(f"palace: mesh refinement up to {cap:,} unknowns ({gb:.0f} GB available)")
+            except ImportError:
+                cap = 0
+        return dict(amr=amr, amr_tol=float(getattr(s, 'palace_amr_tol', 1e-2)), amr_max=cap)
+
     def _modes(self, run, prep, box):
         """The eigenmode run (R-E19): the model's --palace-modes resonances above fmin, on the driven run's mesh and
         settings, the ports as their resistors. Logged as a table, written as <name>_palace_modes.json; returns
@@ -222,7 +248,7 @@ class Palace(Solver):
         from . import config, run as prun
         s, work, mdl = run.s, prep['work'], prep['model']
         n = int(s.palace_modes)
-        cfg = config.eigen(mdl, n, run.fmin, order=s.palace_order, loss=bool(s.palace_loss), box=box)
+        cfg = config.eigen(mdl, n, run.fmin, order=s.palace_order, loss=bool(s.palace_loss), box=box, **self._amr(run))
         with open(os.path.join(work, 'palace_eig.json'), 'w') as fh:
             json.dump(cfg, fh, indent=1)
         run.log(f"palace: eigenmodes, {n} above {run.fmin / 1e9:g} GHz ({'a metal can' if box == 'pec' else 'open box'})")

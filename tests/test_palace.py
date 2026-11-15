@@ -386,3 +386,35 @@ def test_read_modes_of_palace_csv(tmp_path):
     assert m[0]['Q'] == pytest.approx(154) and m[0]['q_ext'] == {1: 310.0, 2: 320.0}
     assert m[1]['f_im_Hz'] == pytest.approx(1e7)
 
+
+
+def test_refinement_has_a_cap_and_reaches_the_eigenmode_run():
+    """R-E20: the refinement stops at amr_max unknowns, in the driven run and in the eigenmode run alike."""
+    mdl = _two_ports()
+    r = config.config(mdl, np.linspace(1e9, 2e9, 3), amr=3, amr_max=250000)['Model']['Refinement']
+    assert r == dict(MaxIts=3, Tol=1e-2, SaveAdaptIterations=False, MaxSize=250000)
+    assert config.eigen(mdl, 2, 4e9, amr=2, amr_tol=1e-3)['Model']['Refinement'] == dict(
+        MaxIts=2, Tol=1e-3, SaveAdaptIterations=False)
+    assert 'Refinement' not in config.eigen(mdl, 2, 4e9)['Model']
+
+
+def test_the_absorbing_boundary_can_be_second_order():
+    mdl = _two_ports()
+    assert config.config(mdl, [1e9], abc=2)['Boundaries']['Absorbing']['Order'] == 2
+    with pytest.raises(ValueError):
+        config.config(mdl, [1e9], abc=3)
+
+
+def test_the_refinement_cap_follows_the_memory_available(monkeypatch):
+    from kicad2ems_fem.palace.plugin import Palace
+    import emsdev.memory
+    monkeypatch.setattr(emsdev.memory, 'available', lambda: 31e9)
+    logs = []
+    r = SimpleNamespace(s=SimpleNamespace(palace_amr=2, palace_amr_tol=1e-2, palace_amr_max=0), log=logs.append)
+    got = Palace()._amr(r)
+    assert got['amr'] == 2 and got['amr_max'] == int((0.7 * 31 - Palace.GB0) / Palace.GB_PER_KUNKNOWN * 1e3)
+    assert 'unknowns' in logs[0]
+    r.s.palace_amr_max = 123456
+    assert Palace()._amr(r)['amr_max'] == 123456
+    r.s.palace_amr = 0
+    assert Palace()._amr(r) == dict(amr=0)

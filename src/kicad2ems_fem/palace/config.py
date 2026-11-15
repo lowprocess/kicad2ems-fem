@@ -25,7 +25,7 @@ BOXES = ('absorbing', 'pec')
 
 
 def config(mdl, freq, order=2, tol=1e-3, out='postpro', verbose=2, max_samples=40, loss=False, sigma=5.8e7,
-           plating=0.025, excite=None, farfield=None, amr=0, amr_tol=1e-2, box='absorbing'):
+           plating=0.025, excite=None, farfield=None, amr=0, amr_tol=1e-2, box='absorbing', amr_max=0, abc=1):
     """loss: the copper as Palace's finite-thickness conductivity boundary (each layer's sheets their thickness,
     two-sided; the via walls one-sided, the plating thick) instead of PEC. Against FastHenry's volume filaments on
     a 20 x 10 mm strip loop this gave R within 1% at 1 MHz, 5% at 10 MHz and 30% high at 100 MHz (a zero-thickness
@@ -35,8 +35,12 @@ def config(mdl, freq, order=2, tol=1e-3, out='postpro', verbose=2, max_samples=4
     farfield: (n, 2) angles (theta, phi in degrees) at which Palace writes the far field r E of each solve, from
     the fields on the air box's faces (farfield-rE.csv). amr: passes of Palace's adaptive mesh refinement (its
     Model.Refinement: the cells where its error estimate is largest split, until the estimate is below amr_tol;
-    0: none; R-E3: it had never been used). box: the air box's faces, 'absorbing' (first order: the board in free
-    space) or 'pec' (a closed metal can, the model's margin its distance from the board on every side)."""
+    0: none; R-E3: it had never been used); amr_max: the unknowns past which it refines no further (0: no limit).
+    box: the air box's faces, 'absorbing' (the board in free space) or 'pec' (a closed metal can, the model's
+    margin its distance from the board on every side). abc: the absorbing boundary's order, 1 or 2 (R-E20: the
+    second takes the curvature of the field on the faces too)."""
+    if abc not in (1, 2):
+        raise ValueError(f"abc: the absorbing boundary's order, 1 or 2, not {abc!r}")
     if farfield is not None and box != 'absorbing':
         raise ValueError("a far field needs the absorbing box (box='absorbing')")
     f = np.asarray(freq, float) / 1e9                       # GHz
@@ -51,15 +55,13 @@ def config(mdl, freq, order=2, tol=1e-3, out='postpro', verbose=2, max_samples=4
     driven = dict(Samples=samples, Save=[])
     if tol and len(f) > 2:
         driven.update(AdaptiveTol=tol, AdaptiveMaxSamples=max_samples)
-    boundaries = dict(**_boundaries(mdl, loss, sigma, plating, box), LumpedPort=ports)
+    boundaries = dict(**_boundaries(mdl, loss, sigma, plating, box, abc), LumpedPort=ports)
     if farfield is not None:
         boundaries['Postprocessing'] = dict(FarField=dict(
             Attributes=[mdl.absorb], ThetaPhis=[[float(t), float(p)] for t, p in np.asarray(farfield, float)]))
     return {
         'Problem': dict(Type='Driven', Verbose=verbose, Output=out),
-        'Model': dict(Mesh=mdl.path.rsplit('/', 1)[-1], L0=1e-3,
-                      **({'Refinement': dict(MaxIts=int(amr), Tol=float(amr_tol), SaveAdaptIterations=False)}
-                         if amr else {})),
+        'Model': _model(mdl, amr, amr_tol, amr_max),
         'Domains': dict(Materials=materials),
         'Boundaries': boundaries,
         'Solver': dict(Order=order, Device='CPU', Driven=driven,
@@ -68,22 +70,31 @@ def config(mdl, freq, order=2, tol=1e-3, out='postpro', verbose=2, max_samples=4
 
 
 def eigen(mdl, n, target, order=2, out='postpro_eig', verbose=2, loss=False, sigma=5.8e7, plating=0.025,
-          box='pec', tol=1e-6):
+          box='pec', tol=1e-6, amr=0, amr_tol=1e-2, amr_max=0):
     """The Palace config of an eigenmode run (R-E19): the model's n resonances above `target` Hz, each one's
     complex frequency and Q (eig.csv) and the ports' share of its loss (port-Q.csv, the ports as their
     resistors). box as config's: 'pec' a can's cavity modes, 'absorbing' the open board's (its radiation then in
-    Q)."""
+    Q; the boundary first order). amr, amr_tol, amr_max as config's: the mesh refined on the modes' error."""
     if box not in BOXES:
         raise ValueError(f"box: one of {', '.join(BOXES)}, not {box!r}")
     return {
         'Problem': dict(Type='Eigenmode', Verbose=verbose, Output=out),
-        'Model': dict(Mesh=mdl.path.rsplit('/', 1)[-1], L0=1e-3),
+        'Model': _model(mdl, amr, amr_tol, amr_max),
         'Domains': dict(Materials=_materials(mdl)),
         'Boundaries': dict(**_boundaries(mdl, loss, sigma, plating, box), LumpedPort=_ports(mdl, set())),
         'Solver': dict(Order=order, Device='CPU',
                        Eigenmode=dict(N=int(n), Tol=float(tol), Target=float(target) / 1e9, Save=0),
                        Linear=dict(Type='Default', KSPType='GMRES', Tol=1e-8, MaxIts=400, **LINEAR)),
     }
+
+
+def _model(mdl, amr, amr_tol, amr_max):
+    """config's Model: the mesh, mm, and Palace's adaptive refinement where asked (amr passes)."""
+    out = dict(Mesh=mdl.path.rsplit('/', 1)[-1], L0=1e-3)
+    if amr:
+        out['Refinement'] = dict(MaxIts=int(amr), Tol=float(amr_tol), SaveAdaptIterations=False,
+                                 **({'MaxSize': int(amr_max)} if amr_max else {}))
+    return out
 
 
 def _ports(mdl, driven):
@@ -106,7 +117,7 @@ def _materials(mdl):
     return materials
 
 
-def _boundaries(mdl, loss, sigma, plating, box):
+def _boundaries(mdl, loss, sigma, plating, box, abc=1):
     """The copper (PEC, or lossy sheets) and the air box's faces: absorbing, or PEC (a can)."""
     if box not in BOXES:
         raise ValueError(f"box: one of {', '.join(BOXES)}, not {box!r}")
@@ -115,7 +126,7 @@ def _boundaries(mdl, loss, sigma, plating, box):
         pec = out.setdefault('PEC', dict(Attributes=[]))
         pec['Attributes'] = list(pec['Attributes']) + [mdl.absorb]
     else:
-        out['Absorbing'] = dict(Attributes=[mdl.absorb], Order=1)
+        out['Absorbing'] = dict(Attributes=[mdl.absorb], Order=int(abc))
     return out
 
 

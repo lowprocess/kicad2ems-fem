@@ -151,8 +151,11 @@ plots, JSON and report section. A phased drive (`drive`) is not modelled.
 | `antenna_patch`, 2 to 3 GHz | 2.4375 GHz, −37.6 dB, band 2.410 to 2.467 GHz; D 7.03 dBi, efficiency 41%, gain 3.16 dBi | 2.4375 GHz, −34.6 dB, 2.408 to 2.470 GHz; 7.02 dBi, 39%, 2.89 dBi | 2.450 GHz, −30.5 dB, 2.425 to 2.480 GHz; 6.33 dBi, 36%, 1.94 dBi |
 
 The dipole takes 3.8 min (86,000 tetrahedra, 8.2 GB) and the patch 4.0 min (94,000, 8.6 GB); gfdtd takes
-seconds. At `feature = 1` they took 71 s and 84 s, with the patch's resonance 0.7% lower (2.420 GHz). The efficiency reads up to 0.5% over 100% on the dipole away from resonance: the absorbing boundary
-is first order.
+seconds. At `feature = 1` they took 71 s and 84 s, with the patch's resonance 0.7% lower (2.420 GHz). The
+efficiency reads up to 0.5% over 100% on the dipole away from resonance, and the boundary's order is not why: the
+second-order one (`abc = 2`) moves the match a little (S11 at resonance −20.5 dB to −22.7 dB at `feature = 1`)
+and the efficiency not at all (100.4% at 2.9 GHz either way). The excess is in the far field's integration over
+the box's faces.
 
 ### In a can: resonances
 
@@ -173,8 +176,16 @@ above the board), `box = "pec"`, `margin = 4`, `modes = 3`, 118,000 tetrahedra, 
 | modes 2 and 3 | 5.36 and 6.95 GHz, Q 1.1 and 2.1: the feed lines, each damped by its port | |
 | mode 4, the can | 7.115 GHz, Q 559 | |
 
-The eigenmode's frequency is the driven peak's to 5 digits. Both sit 0.8 % above the converged one at the
-default mesh (`feature = 4`); the mesh, not the eigensolver, is what to refine.
+The eigenmode's frequency is the driven peak's to 5 digits. Both sit 0.8 % above EMerge's 4.621 GHz, and the
+mesh is not why: Palace's own refinement (`amr`) from `feature = 1` goes 4.626, 4.607, 4.635, 4.651 GHz (165,000
+to 547,000 unknowns; 417 s, 7.0 GB), towards the default mesh's 4.657 GHz (813,000 unknowns; 195 s, 10 GB for
+the eigenmode run). openEMS's refinement climbs the same way (4.555, 4.588, 4.626 GHz at 1x, 2x and 4x its
+default mesh) and has not settled; mom25d, without the can, has 4.648 GHz. Which is right is open.
+
+Refinement (`amr = N`) applies to the eigenmode run too, refining on the modes' error, and stops at `amr_max`
+unknowns: by default what 70 % of the memory available holds at Palace's 12 MB a thousand unknowns (a pass can
+double the mesh). On `rf_shielded` it took twice the time of the default mesh for a slightly coarser answer, so
+the default stays `feature = 4`; `amr` is for checking that an answer has settled.
 
 ### Palace itself
 
@@ -209,6 +220,8 @@ older one.
 | `np` | 8 | MPI processes |
 | `fine_ground` | false | the feature size at the ground's own edges, ground vias (round) and edge walls too |
 | `loss` | false | copper loss: the sheets as Palace's finite-thickness conductivity boundary. Good to ~10 MHz, high above (the sheet edges' singular current) |
+| `amr`, `amr_tol`, `amr_max` | 0, 1e-2, from the memory | Palace's adaptive mesh refinement: its passes, the error to stop at and the unknowns it stops at (default: what 70% of the memory available holds) |
+| `abc` | 1 | the absorbing boundary's order, 1 or 2 |
 | `box` | absorbing | the air box's faces: `absorbing` (free space, first order) or `pec` (a metal can, `margin` from the board) |
 | `modes` | 0 | after the driven run, an eigenmode run: the N resonances above `fmin`, their frequency, Q and each port's share |
 
