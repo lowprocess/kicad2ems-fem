@@ -295,9 +295,30 @@ coils after the model's inductors), so a circuit's run uses the coils as solved,
 capacitor tuned to the old inductance is not retuned. In a config:
 `[analysis.elmer_mag] coil = ["tx: turns=10 ...", "rx: ..."]`.
 
-Left out: the winding's resistance and its skin and proximity loss, the ferrite's loss and saturation, metal
-nearby (a shield or a battery behind the ferrite carries eddy currents; this is a static field), and coils drawn
-as board copper, which pcbqs solves in air. The result is what the power circuit's coil model takes: L1, L2, k.
+**At the operating frequency** (`--freq F`, Hz; `freq` in the window). Each coil is solved again alone in
+the time-harmonic field at F (Elmer's WhitneyAVHarmonicSolver), and `mag.json` gains `ac`: its inductance there
+and its series resistance, in three parts, and its Q:
+- the ferrite's loss, from a plate's `mur_im` (μ″, the datasheet's at F): (ω/2)·μ0·μ″·|H|² a unit volume, from
+  the integral of |B|² over the plate (its elemental field; the nodal one, averaged across the plate's faces,
+  read 10% low). Elmer's own harmonic loss reads 0 in Elmer 26.2, its test case's too;
+- a metal plate's eddy currents (`sigma=` S/m instead of `mur`: a shield, a battery's can). It is a hole in the
+  air whose faces are a surface impedance, so its skin depth must be well under its thickness. The static run
+  leaves it out (a non-magnetic metal is transparent at DC);
+- the winding's own resistance at F, given (`r=` ohms on the coil: its datasheet's or a measurement). Its skin
+  and proximity loss is not solved: the turns' current is spread over the section.
+
+| Check, the 10-turn ring at 100 kHz | Result |
+|---|---|
+| A plate of µr 10, µ″ 0.1, 3 mm under it: the loss against the static field's energy, mu′ ±5% | R 4.680 mΩ; 4.685 from the energies (0.1%) |
+| A copper disc 3 mm under it (r 80 mm, 2 mm thick, skin depth 0.21 mm) against its mirror image | L 1.980 µH (image 1.983), R 22.9 mΩ (the image's infinite plane 23.5); 78,000 tetrahedra, 101 s |
+| An aluminium plate (3.5e7 S/m, r 40 mm, 4 mm under it) | L 1.98 µH, R 29.3 mΩ, Q 42 |
+| A ferrite sheet (µr 200, µ″ 5, 1 mm thick, r 30 mm, 0.5 mm under it) | L 6.28 µH, R 3.09 mΩ, Q 1,280 |
+| The sheet with the aluminium behind it | L 6.10 µH, R 5.74 mΩ (ferrite 3.43, metal 2.31), Q 667: the sheet shields the metal, which pushes more flux into the sheet |
+
+Left out: the winding's skin and proximity loss, the ferrite's saturation, a metal plate thinner than a few skin
+depths, and coils drawn as board copper, which pcbqs solves in air. The result is what the power circuit's coil
+model takes: L1, L2, k; the resistance at F is reported, not proposed to the circuit (its `AC_R_ohm` is a
+winding's curve over frequency, one frequency's value would stand for all of it).
 
 | Check | Result |
 |---|---|

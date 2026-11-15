@@ -96,3 +96,65 @@ def test_a_coil_on_a_wide_ferrite_plate_against_its_image(tmp_path):
     two = mag.air_core([TX, dict(TX, name='image', z=-2 * gap - TX['t'])])
     assert r['L'][0][0] == pytest.approx(two[0, 0] + (mur - 1) / (mur + 1) * two[0, 1], rel=0.015)
     assert r['air'][0][0] == pytest.approx(two[0, 0])
+
+
+def test_the_harmonic_sif_has_the_ferrites_integral_and_the_metals_impedance():
+    """R-E21: --freq solves the time-harmonic field; a lossy ferrite's |B|^2 is integrated over its body (its
+    elemental field: the nodal one, averaged across its faces, read 10 % low), a metal plate is a surface impedance."""
+    m = dict(bodies={1: ('air', 0), 2: ('coil', 0), 3: ('plate', 0)}, metals={mag.METAL0: 1})
+    plates = [dict(mur=200, mur_im=5), dict(mur=1.0, sigma=3.5e7)]
+    s = mag.sif(m, [TX], plates, [1.0], freq=1e5)
+    assert '"MagnetoDynamics" "WhitneyAVHarmonicSolver"' in s and 'AV[AV re:1 AV im:1]' in s
+    assert 'Angular Frequency = Real 628318.530718' in s and 'AV re {e} = 0.0' in s
+    assert 'ferrite1 = Logical True' in s and '"Magnetic Flux Density E"' in s and '"body int square"' in s
+    assert f'Target Boundaries(1) = {mag.METAL0}' in s and 'Layer Electric Conductivity = Real 35000000' in s
+    static = mag.sif(m, [TX], plates, [1.0])
+    assert 'WhitneyAVSolver' in static and 'Layer Electric' not in static and 'ferrite1' not in static
+
+
+def test_a_metal_plate_is_non_magnetic_unless_said():
+    c, p = [dict(TX)], [dict(z=-4, t=1, r=40, sigma=3.5e7)]
+    mag._check(c, p)
+    assert p[0]['mur'] == 1.0
+    with pytest.raises(ValueError):
+        mag._check([dict(TX)], [dict(z=-4, t=1, r=40, sigma=3.5e7, mur_im=1)])
+
+
+@needs_elmer
+def test_a_ferrites_loss_is_its_share_of_the_energy(tmp_path):
+    """At a fixed current the field energy grows by W_p dmu/mu as a plate's mu' does, and its loss is 2 w tan d W_p
+    for a 1 A peak: the harmonic run's |B|^2 integral against two static runs' energies (mu' 10 +-5 %, where the
+    plate holds enough of the energy for the difference to be well above the solver's noise)."""
+    plate = dict(z=-3, t=2.5, r=50, mur=10, mur_im=0.1)
+    r = mag.solve([TX], [plate], tmp_path / 'ac', h=3.0, log=quiet, freq=1e5)
+    lo = mag.solve([TX], [dict(plate, mur=9.5, mur_im=0)], tmp_path / 'lo', h=3.0, log=quiet)['L'][0][0]
+    hi = mag.solve([TX], [dict(plate, mur=10.5, mur_im=0)], tmp_path / 'hi', h=3.0, log=quiet)['L'][0][0]
+    w_p = (hi - lo) / 2 / np.log(10.5 / 9.5)
+    a = r['ac'][0]
+    # (2 %: each solve meshes again, and gmsh's threaded mesher does not repeat a mesh exactly; on one mesh, h 2,
+    # they were 0.1 % apart)
+    assert a['R_ferrite'] == pytest.approx(2 * 2 * np.pi * 1e5 * 0.01 * w_p, rel=0.02)
+    assert a['L'] == pytest.approx(r['L'][0][0], rel=1e-4) and a['R_metal'] == 0
+    assert a['Q'] == pytest.approx(2 * np.pi * 1e5 * a['L'] / a['R'])
+
+
+@needs_elmer
+def test_a_coil_over_copper_against_its_image(tmp_path):
+    """A copper disc 3 mm under the coil, its skin depth (0.21 mm at 100 kHz) well under its 2 mm: L as the coil
+    less its mutual with its mirror image, R the surface resistance over the image's doubled tangential H."""
+    from scipy.special import ellipe, ellipk
+    r = mag.solve([TX], [dict(z=-5, t=2, r=80, sigma=5.8e7)], tmp_path, h=3.0, log=quiet, freq=1e5)
+    two = mag.air_core([TX, dict(TX, name='image', z=-7.0)])
+    a = r['ac'][0]
+    assert a['L'] == pytest.approx(two[0, 0] - two[0, 1], rel=0.01)
+    rf, zf = (v.ravel() for v in mag._filaments(TX, 24, 4)[:2])
+    rho = np.linspace(1e-5, 80e-3, 4000)
+    hr = np.zeros_like(rho)
+    for a_, z0 in zip(rf, zf):
+        dz = -3e-3 - z0
+        m = 4 * a_ * rho / ((a_ + rho) ** 2 + dz ** 2)
+        hr += (TX['turns'] / rf.size) / (2 * np.pi) * dz / (rho * np.sqrt((a_ + rho) ** 2 + dz ** 2)) * (
+            -ellipk(m) + (a_ ** 2 + rho ** 2 + dz ** 2) / ((a_ - rho) ** 2 + dz ** 2) * ellipe(m))
+    rs = np.sqrt(np.pi * 1e5 * mag.MU0 / 5.8e7)
+    assert a['R_metal'] == pytest.approx(rs * np.trapezoid((2 * hr) ** 2 * 2 * np.pi * rho, rho), rel=0.06)
+    assert r['L'][0][0] == pytest.approx(two[0, 0], rel=0.01)              # the static run: copper transparent

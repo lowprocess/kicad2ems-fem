@@ -316,7 +316,7 @@ class ElmerMag(_Fem):
             cmd += ['--plate', p]
         for o in self.options():
             v = str(values.get(o['key']) if values.get(o['key']) is not None else '').strip()
-            if o['key'] in ('h', 'margin') and v and v != str(o['default']):
+            if o['key'] in ('h', 'margin', 'freq') and v and v not in (str(o['default']), 'None'):
                 cmd += [o['flag'], v]
         return cmd
 
@@ -326,8 +326,12 @@ class ElmerMag(_Fem):
             return []
         n = r['names']
         out = [dict(name=f"L {a}", value=r['L'][i][i] * 1e6, unit='uH') for i, a in enumerate(n)]
-        return out + [dict(name=f"k {n[j]},{n[i]}", value=r['k'][i][j], unit='') for i in range(len(n))
-                      for j in range(i)]
+        out += [dict(name=f"k {n[j]},{n[i]}", value=r['k'][i][j], unit='') for i in range(len(n)) for j in range(i)]
+        for a in r.get('ac') or []:                              # at the operating frequency (R-E21)
+            out += [dict(name=f"R {a['name']} at {r['freq'] / 1e3:g} kHz", value=a['R'] * 1e3, unit='mohm')]
+            if a.get('Q'):
+                out += [dict(name=f"Q {a['name']} at {r['freq'] / 1e3:g} kHz", value=a['Q'], unit='')]
+        return out
 
     def report(self, folder):
         r = self._read(folder)
@@ -349,19 +353,39 @@ class ElmerMag(_Fem):
                             table=dict(columns=['coils', 'M (uH)', 'k', 'k in air'],
                                        rows=[[f"{n[j]} to {n[i]}", L[i][j] * 1e6, r['k'][i][j], ka(i, j)] for i, j in pairs],
                                        formats=[None, '.3f', '.4f', '.4f'])))
+        if r.get('ac'):
+            f = r['freq']
+            sec.append(dict(title=f"At {f / 1e3:g} kHz",
+                            text="Each coil alone in the time-harmonic field: its inductance with the metal's eddy "
+                                 "currents, and its series resistance from the ferrite's loss (mu''), the metal's "
+                                 "(its surface impedance) and the winding's own (r=, given). The winding's skin and "
+                                 "proximity loss is not solved: the coil is its turns' current spread over the section.",
+                            table=dict(columns=['coil', 'L (uH)', 'R ferrite (mohm)', 'R metal (mohm)',
+                                                'R winding (mohm)', 'R (mohm)', 'Q'],
+                                       rows=[[a['name'], a['L'] * 1e6, a['R_ferrite'] * 1e3, a['R_metal'] * 1e3,
+                                              a['R_winding'] * 1e3, a['R'] * 1e3, a['Q'] if a.get('Q') else '']
+                                             for a in r['ac']],
+                                       formats=[None, '.3f', '.3g', '.3g', '.3g', '.3g', '.4g'])))
         if r.get('plates'):
-            sec.append(dict(title='Ferrite plates',
-                            table=dict(columns=['z (mm)', 'thickness (mm)', 'mu_r', 'size (mm)'],
-                                       rows=[[p.get('z', 0.0), p.get('t', 0.0), p.get('mur', 1.0),
+            sec.append(dict(title='Plates',
+                            table=dict(columns=['z (mm)', 'thickness (mm)', 'mu_r', "mu''", 'sigma (S/m)', 'size (mm)'],
+                                       rows=[[p.get('z', 0.0), p.get('t', 0.0), p.get('mur', 1.0), p.get('mur_im', ''),
+                                              p.get('sigma', ''),
                                               f"r {p['r']:g}" if 'r' in p else 'x'.join(f"{v:g}" for v in p.get('size', ()))]
-                                             for p in r['plates']], formats=['.2f', '.2f', '.0f', None])))
+                                             for p in r['plates']], formats=['.2f', '.2f', '.0f', '.3g', '.3g', None])))
         head = ', '.join(f"{a} {L[i][i] * 1e6:.3g} uH" for i, a in enumerate(n))
         if pairs:
             i, j = pairs[0]
             head += f"; k {r['k'][i][j]:.3f} ({n[j]} to {n[i]})"
+        if r.get('ac'):
+            head += '; at ' + f"{r['freq'] / 1e3:g} kHz " + ', '.join(
+                f"{a['name']} Q {a['Q']:.3g}" for a in r['ac'] if a.get('Q'))
         return dict(title=f"Coils with ferrite: {', '.join(n)}", summary=head, sections=sec,
-                    notes=["Static field: no winding resistance, skin or proximity loss, no ferrite loss or "
-                           "saturation, no eddy currents in metal nearby."],
+                    notes=["The inductances and couplings are the static field's (a metal plate is transparent "
+                           "to it). " + ("The frequency's run adds the ferrite's and the metal's loss and the "
+                                         "metal's eddy currents; " if r.get('ac') else
+                                         "Give a frequency for the loss, R and Q there; ") +
+                           "the winding's skin and proximity loss and the ferrite's saturation are not modelled."],
                     footer=f"Elmer, {r.get('tets', 0):,} tetrahedra, {_seconds(r):.0f} s")
 
     def suggest(self, folder):

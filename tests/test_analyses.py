@@ -191,13 +191,27 @@ def test_coils_with_ferrite_are_a_question_of_their_own_with_no_board(tmp_path, 
     assert a.owns(str(tmp_path))
     rep = a.report(str(tmp_path))
     assert rep['summary'] == 'tx 6.45 uH, rx 6.8 uH; k 0.567 (tx to rx)'
-    assert [s['title'] for s in rep['sections']] == ['Inductances', 'Coupling', 'Ferrite plates']
+    assert [s['title'] for s in rep['sections']] == ['Inductances', 'Coupling', 'Plates']
     assert rep['sections'][0]['table']['rows'][0][:3] == ['tx', 10, pytest.approx(6.45)]
     figs = {f['name']: f['value'] for f in a.figures(str(tmp_path))}
     assert figs['L tx'] == pytest.approx(6.45) and figs['k tx,rx'] == pytest.approx(0.567)
     s, = a.suggest(str(tmp_path))
     # each coil for the model's inductor of its name, each pair's coupling by its two inductors: no model assumed
     assert s['to'] == 'circuit' and s['values'] == dict(set='tx.value=6.45e-06\nrx.value=6.8e-06\ncouplings.tx+rx.k=0.5670')
+    # R-E21: a frequency on the command line, and its run's AC table, figures and summary
+    assert a.command(dict(coil='tx: turns=1 inner=1 outer=2 z=0 t=1', freq='1e5'), None, str(tmp_path))[-2:] == [
+        '--freq', '1e5']
+    r.update(freq=1e5, ac=[dict(name='tx', L=6.1e-6, R_ferrite=3.43e-3, R_metal=2.31e-3, R_winding=0.0, R=5.74e-3,
+                                Q=667.0), dict(name='rx', L=6.7e-6, R_ferrite=1e-3, R_metal=0.0, R_winding=0.0,
+                                               R=1e-3, Q=4210.0)])
+    (tmp_path / 'mag.json').write_text(json.dumps(r))
+    rep = a.report(str(tmp_path))
+    assert [s['title'] for s in rep['sections']] == ['Inductances', 'Coupling', 'At 100 kHz', 'Plates']
+    assert rep['sections'][2]['table']['rows'][0] == ['tx', pytest.approx(6.1), pytest.approx(3.43),
+                                                      pytest.approx(2.31), 0.0, pytest.approx(5.74), 667.0]
+    assert rep['summary'].endswith('at 100 kHz tx Q 667, rx Q 4.21e+03')
+    figs = {f['name']: f['value'] for f in a.figures(str(tmp_path))}
+    assert figs['R tx at 100 kHz'] == pytest.approx(5.74) and figs['Q rx at 100 kHz'] == 4210.0
     assert 'PRIMARY' not in s['note'] and 'nF' not in s['note']
     (tmp_path / 'mag.json').write_text(json.dumps(dict(r, names=['tx'], L=[[6.45e-6]], k=[[1.0]], air=[[3.74e-6]])))
     (s,) = a.suggest(str(tmp_path))                                 # one coil: its inductance, no pair
