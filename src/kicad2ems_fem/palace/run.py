@@ -6,6 +6,7 @@ Running Palace and reading its S-parameters.
     f, S = read_s(workdir + '/postpro', nports)
     f, P = read_incident(workdir + '/postpro', 1)         # the driven port's incident power, each solve
     f, th, ph, E = read_farfield(workdir + '/postpro')    # the far field r E at the config's angles
+    modes = read_modes(workdir + '/postpro_eig')          # an eigenmode run's resonances: f, Q, the ports' Q
 
 Palace is found as
   K2E_PALACE          a `palace` executable (its MPI wrapper), or `palace` on PATH: run directly, with its own
@@ -158,7 +159,7 @@ def read_s(postpro, n):
 
 def table(path):
     """(column names, rows) of one of Palace's CSV files."""
-    with open(path) as fh:
+    with open(path, encoding="utf-8", errors="replace") as fh:          # (port-Q.csv: a κ in its header)
         cols = [h.strip() for h in fh.readline().split(',')]
     return cols, np.loadtxt(path, delimiter=',', skiprows=1, ndmin=2)
 
@@ -200,3 +201,30 @@ def read_farfield(postpro):
         for x in range(3):
             E[i, :, x] = d[:, comp[2 * x][0]] + 1j * d[:, comp[2 * x + 1][0]]
     return freqs * 1e9, first[:, th], first[:, ph], E
+
+
+def read_modes(postpro):
+    """An eigenmode run's modes from Palace's eig.csv (and port-Q.csv where the ports have resistors):
+    [dict(f_Hz, f_im_Hz, Q, error, q_ext={port index (1-based): Q})], by rising frequency. The fields' time
+    dependence is exp(i w t): a decaying mode has Im f > 0 and Q = Re f / (2 Im f)."""
+    cols, data = table(os.path.join(postpro, 'eig.csv'))
+
+    def col(name):
+        k = [c for c, h in enumerate(cols) if h.startswith(name)]
+        if len(k) != 1:
+            raise ValueError(f"eig.csv: no single column {name!r} in {cols}")
+        return data[:, k[0]]
+    idx, fre, fim, q, err = col('m'), col('Re{f}'), col('Im{f}'), col('Q'), col('Error (Bkwd.)')
+    q_ext = {int(k): {} for k in idx}                     # by the mode's number, the two files' rows matched by it
+    pq = os.path.join(postpro, 'port-Q.csv')
+    if os.path.exists(pq):
+        import re
+        pcols, pdata = table(pq)
+        for c, h in enumerate(pcols):
+            m = re.match(r'Q_ext\[(\d+)\]', h)
+            if m:
+                for row in pdata:
+                    q_ext.setdefault(int(row[0]), {})[int(m.group(1))] = float(row[c])
+    out = [dict(f_Hz=float(a) * 1e9, f_im_Hz=float(b) * 1e9, Q=float(c), error=float(e), q_ext=q_ext[int(k)])
+           for k, a, b, c, e in zip(idx, fre, fim, q, err)]
+    return sorted(out, key=lambda m: m['f_Hz'])

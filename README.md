@@ -77,7 +77,7 @@ iterative ones diverged on thin copper. A million tetrahedra take about 3.5 GB (
 ## Palace: S-parameters
 
 The board is meshed in tetrahedra by gmsh (`palace/model.py`):
-- the dielectric slabs inside the board outline, in an air box with an absorbing boundary;
+- the dielectric slabs inside the board outline, in an air box with an absorbing boundary (or metal: `box`);
 - copper as PEC sheets of zero thickness on each copper layer (`loss`: lossy sheets);
 - vias as PEC holes;
 - lumped ports as rectangles, across the trace from the reference copper or across a gap;
@@ -154,6 +154,28 @@ The dipole takes 3.8 min (86,000 tetrahedra, 8.2 GB) and the patch 4.0 min (94,0
 seconds. At `feature = 1` they took 71 s and 84 s, with the patch's resonance 0.7% lower (2.420 GHz). The efficiency reads up to 0.5% over 100% on the dipole away from resonance: the absorbing boundary
 is first order.
 
+### In a can: resonances
+
+`box = "pec"` closes the air box in metal: a can on all six sides, `margin` its distance from the board.
+`modes = N` adds an eigenmode run after the driven one, on the same mesh: the model's N resonances above
+`fmin`, each one's frequency and Q, with the ports as their resistors so the Q is the loaded one, and each
+port's share (Q_ext, Palace's `port-Q.csv`). They are logged, written as `<name>_palace_modes.json` and shown
+as a table in the report's Palace section. In an open box (`box = "absorbing"`) the Q includes what radiates.
+A mode with Q under 5 is a feed line damped by its port's resistor, not a resonance, and is marked so.
+
+`rf_shielded` (kicad2ems's example: a half-wave resonator side-coupled to two lines in a can 4 mm round and
+above the board), `box = "pec"`, `margin = 4`, `modes = 3`, 118,000 tetrahedra, 5.7 min for both runs, 10.7 GB:
+
+| | Palace | other solvers |
+|---|---|---|
+| driven: S21 peak | 4.657 GHz, −4.1 dB; −3 dB band 4.644 to 4.672 GHz | EMerge (converged) 4.621 GHz; openEMS (4× mesh) and gfdtd 4.625 GHz; mom25d, without the can, 4.648 GHz |
+| mode 1, the resonator | 4.6574 GHz, Q 157.5 (f/Q 29.6 MHz); Q_ext P1 457, P2 554 | |
+| modes 2 and 3 | 5.36 and 6.95 GHz, Q 1.1 and 2.1: the feed lines, each damped by its port | |
+| mode 4, the can | 7.115 GHz, Q 559 | |
+
+The eigenmode's frequency is the driven peak's to 5 digits. Both sit 0.8 % above the converged one at the
+default mesh (`feature = 4`); the mesh, not the eigensolver, is what to refine.
+
 ### Palace itself
 
 Palace is not on PyPI. `run.py` finds it as
@@ -187,6 +209,8 @@ older one.
 | `np` | 8 | MPI processes |
 | `fine_ground` | false | the feature size at the ground's own edges, ground vias (round) and edge walls too |
 | `loss` | false | copper loss: the sheets as Palace's finite-thickness conductivity boundary. Good to ~10 MHz, high above (the sheet edges' singular current) |
+| `box` | absorbing | the air box's faces: `absorbing` (free space, first order) or `pec` (a metal can, `margin` from the board) |
+| `modes` | 0 | after the driven run, an eigenmode run: the N resonances above `fmin`, their frequency, Q and each port's share |
 
 ## Elmer: temperature
 

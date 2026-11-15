@@ -336,3 +336,53 @@ def test_the_estimate_is_its_mesh_scaled_by_the_runs():
     tets = int(e['what'].split()[0].replace(',', ''))
     assert tets > 100 and e['gb'] == pytest.approx(pl.GB0 + pl.GB_PER_KUNKNOWN * pl.UNKNOWNS_PER_TET * tets / 1e3)
     assert e['seconds'] == pytest.approx(pl.T0 * tets ** 1.5) and 'order 2' in e['what']
+
+
+def _two_ports():
+    return model.Model('w/model.msh', [(1, 3.5, 0.002)], model.AIR, [model.PEC], model.ABSORB,
+                       [dict(attr=201, index=1, R=50.0, direction='+Z', name='P1'),
+                        dict(attr=202, index=2, R=50.0, direction='+Z', name='P2')], 0.1, 1.0, 5.0)
+
+
+def test_a_pec_box_is_a_can():
+    """--palace-box pec: the air box's faces join the metal; no absorbing boundary is left, and a far field
+    (which needs one) is refused."""
+    mdl = _two_ports()
+    c = config.config(mdl, np.linspace(1e9, 2e9, 3), box='pec')
+    assert 'Absorbing' not in c['Boundaries']
+    assert c['Boundaries']['PEC']['Attributes'] == [model.PEC, model.ABSORB]
+    assert config.config(mdl, np.linspace(1e9, 2e9, 3))['Boundaries']['Absorbing'] == dict(
+        Attributes=[model.ABSORB], Order=1)
+    with pytest.raises(ValueError):
+        config.config(mdl, [1e9], box='pec', farfield=[[0, 0]])
+    with pytest.raises(ValueError):
+        config.config(mdl, [1e9], box='open')
+
+
+def test_eigen_config_loads_every_port_and_excites_none():
+    """R-E19: the eigenmode run's ports are their resistors (Q loaded, the ports' share in port-Q.csv)."""
+    mdl = _two_ports()
+    c = config.eigen(mdl, 3, 4.3e9)
+    assert c['Problem']['Type'] == 'Eigenmode' and c['Problem']['Output'] == 'postpro_eig'
+    assert c['Solver']['Eigenmode'] == dict(N=3, Tol=1e-6, Target=4.3, Save=0)
+    assert [p['R'] for p in c['Boundaries']['LumpedPort']] == [50.0, 50.0]
+    assert not any('Excitation' in p for p in c['Boundaries']['LumpedPort'])
+    assert model.ABSORB in c['Boundaries']['PEC']['Attributes']
+    assert config.eigen(mdl, 1, 1e9, box='absorbing')['Boundaries']['Absorbing']['Attributes'] == [model.ABSORB]
+
+
+def test_read_modes_of_palace_csv(tmp_path):
+    (tmp_path / 'eig.csv').write_text(
+        '            m,          Re{f} (GHz),          Im{f} (GHz),                    Q,'
+        '        Error (Bkwd.),         Error (Abs.)\n'
+        ' 2.000000e+00, +5.100000000000e+00, +1.000000000000e-02, +2.550000000000e+02, +1.0e-10, +1.0e-09\n'
+        ' 1.000000e+00, +4.620000000000e+00, +1.500000000000e-02, +1.540000000000e+02, +2.0e-10, +3.0e-09\n')
+    (tmp_path / 'port-Q.csv').write_text(
+        '            m,            Q_ext[1],    κ_ext[1] (GHz),            Q_ext[2],    κ_ext[2] (GHz)\n'
+        ' 1.000000e+00, +3.1e+02, +1.5e-02, +3.2e+02, +1.4e-02\n'
+        ' 2.000000e+00, +5.0e+02, +1.0e-02, +6.0e+02, +8.0e-03\n', encoding='utf-8')     # matched by m, not row
+    m = run.read_modes(str(tmp_path))
+    assert [round(x['f_Hz'] / 1e9, 3) for x in m] == [4.62, 5.1]
+    assert m[0]['Q'] == pytest.approx(154) and m[0]['q_ext'] == {1: 310.0, 2: 320.0}
+    assert m[1]['f_im_Hz'] == pytest.approx(1e7)
+

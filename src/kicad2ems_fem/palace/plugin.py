@@ -6,8 +6,11 @@ tetrahedra by gmsh (model.py), a driven Palace run over the band with its adapti
 Experimental. What it models: the dielectric slabs inside the board outline, lossy by their tand; copper as
 PEC sheets of zero thickness (or lossy ones, --palace-loss); vias as PEC holes; lumped ports; lumped R / L / C
 parts as lumped boundaries across their gaps; edge walls as PEC sheets; an air box with an absorbing boundary
-around the board. Antenna mode: a second run at a few frequencies for the far field of the driven port
-(antenna.py). Not yet: roughness, surface finish, phased drives.
+around the board, or a closed metal can (--palace-box pec, --palace-margin its distance from the board). Antenna
+mode: a second run at a few frequencies for the far field of the driven port (antenna.py). Eigenmodes
+(--palace-modes N, R-E19): after the driven run, the model's N resonances above fmin, each one's frequency and
+Q loaded by the ports' resistors, in the summary and the report. Not yet: roughness, surface finish, phased
+drives.
 """
 import os
 import time
@@ -18,6 +21,8 @@ from kicad2ems.api.solver import Option, Solver, Result, Deviation
 
 G = 'palace'
 ANTENNA_MARGIN = 0.5            # antenna mode's air around the board, wavelengths at the band centre
+DAMPED_Q = 5.0                  # an eigenmode below this Q: a feed line damped by its port (rf_shielded: Q 1.1, 2.1
+                                # beside the resonator's 158 and the can's 559), not a resonance
 
 
 class _quiet:
@@ -74,7 +79,7 @@ class Palace(Solver):
                         conductor_loss='optional (--palace-loss): finite-thickness surface impedance on the sheets; '
                                        'good to ~10 MHz, high above (edge singularity)',
                         roughness='no', finish='no', dispersion='no: er, tand at one value',
-                        radiation='yes: absorbing boundary', cavity='yes',
+                        radiation='yes: absorbing boundary', cavity='yes: --palace-box pec, a metal can',
                         antenna='yes: the finite board in air, one driven port (no --drive)')
     options = [
         Option('palace_order', 2, "Palace's element order (default {default})", int, name='order',
@@ -97,6 +102,12 @@ class Palace(Solver):
                gui='Palace mesh refinement passes', group=G, cli=dict(metavar='N')),
         Option('palace_amr_tol', 1e-2, "the adaptive mesh refinement's error estimate to stop at (default {default})",
                float, name='amr_tol', group=G),
+        Option('palace_box', 'absorbing', "the air box's faces: absorbing (the board in free space) or pec (a closed "
+               "metal can, --palace-margin its distance from the board on every side)", str, name='box',
+               choices=('absorbing', 'pec'), gui='Palace box', group=G),
+        Option('palace_modes', 0, "after the driven run, the model's N resonances above fmin (an eigenmode run): each "
+               "one's frequency and Q, the ports loading it (default {default}: none)", int, name='modes',
+               gui='Palace resonances', group=G, cli=dict(metavar='N')),
         Option('palace_fine_ground', False, "the feature size at the ground's edges too: the ground planes' own edges, "
                "the vias on ground nets (then round) and the edge walls. Several times the mesh", bool,
                name='fine_ground', gui='Palace fine mesh at the ground', group=G),
@@ -105,10 +116,17 @@ class Palace(Solver):
     def check(self, s=None):
         return palace_status()
 
+    def validate(self, s):
+        if getattr(s, 'palace_modes', 0) and s.palace_modes < 0:
+            return "--palace-modes: a number of resonances, 0 or more"
+        return None
+
     def assess(self, run):
         out = []
         if getattr(run, 'antenna', False) and getattr(run.s, 'drive', None):
             out.append("antenna mode: --drive (a phased drive) is not modelled, one port is driven")
+        if getattr(run, 'antenna', False) and getattr(run.s, 'palace_box', 'absorbing') == 'pec':
+            out.append("antenna mode: the far field needs the absorbing box (--palace-box absorbing), not a can")
         return out
 
     # its cost, from the runs of 2026-11 (the examples on 8 ranks of an i7-13700K, order 2, 391-401 points of the
@@ -167,8 +185,9 @@ class Palace(Solver):
         from kicad2ems.api.solver import mixed_mode
         from . import config, run as prun
         s, work, mdl = run.s, prep['work'], prep['model']
+        box = getattr(s, 'palace_box', None) or 'absorbing'
         cfg = config.config(mdl, run.freq, order=s.palace_order, tol=s.palace_tol, loss=bool(s.palace_loss),
-                            amr=getattr(s, 'palace_amr', 0) or 0, amr_tol=getattr(s, 'palace_amr_tol', 1e-2))
+                            amr=getattr(s, 'palace_amr', 0) or 0, amr_tol=getattr(s, 'palace_amr_tol', 1e-2), box=box)
         with open(os.path.join(work, 'palace.json'), 'w') as fh:
             json.dump(cfg, fh, indent=1)
         t = time.time()
@@ -181,12 +200,54 @@ class Palace(Solver):
             t = time.time()
             self._antenna(run, prep, S)
             seconds += time.time() - t
+        modes = None
+        if getattr(s, 'palace_modes', 0):
+            t = time.time()
+            modes = self._modes(run, prep, box)
+            seconds += time.time() - t
         S, names, zref = mixed_mode(S, run.m)
-        info = dict(tets=mdl.tets, nodes=mdl.nodes, hmin=mdl.hmin, hmax=mdl.hmax, margin=mdl.margin,
+        info = dict(tets=mdl.tets, nodes=mdl.nodes, hmin=mdl.hmin, hmax=mdl.hmax, margin=mdl.margin, box=box,
                     mesh_s=round(prep['mesh_s'], 1), order=s.palace_order, seconds=round(seconds, 1),
                     parts=len(mdl.parts), edge_walls=mdl.edge_wall is not None, engine=prun.engine(prep['work']))
+        if modes is not None:
+            info['modes'] = modes
         return Result(S, names, zref, seconds + prep['mesh_s'], info=info,
                       comment=f"Palace FEM, order {s.palace_order}, {mdl.tets} tets ({run.name})")
+
+    def _modes(self, run, prep, box):
+        """The eigenmode run (R-E19): the model's --palace-modes resonances above fmin, on the driven run's mesh and
+        settings, the ports as their resistors. Logged as a table, written as <name>_palace_modes.json; returns
+        dict(about, rows=[dict(mode, f_ghz, Q, q_ext={port: Q}, error)]) for the summary and the report."""
+        import json
+        from . import config, run as prun
+        s, work, mdl = run.s, prep['work'], prep['model']
+        n = int(s.palace_modes)
+        cfg = config.eigen(mdl, n, run.fmin, order=s.palace_order, loss=bool(s.palace_loss), box=box)
+        with open(os.path.join(work, 'palace_eig.json'), 'w') as fh:
+            json.dump(cfg, fh, indent=1)
+        run.log(f"palace: eigenmodes, {n} above {run.fmin / 1e9:g} GHz ({'a metal can' if box == 'pec' else 'open box'})")
+        prun.run(work, 'palace_eig.json', np=s.palace_np, log=run.log, logfile='palace_eig.log')
+        found = prun.read_modes(os.path.join(work, 'postpro_eig'))
+        names = {p['index']: p['name'] for p in mdl.ports}
+        rows = [dict(mode=i + 1, f_ghz=m['f_Hz'] / 1e9, Q=m['Q'], error=m['error'],
+                     q_ext={names.get(k, str(k)): v for k, v in m['q_ext'].items() if k in names},
+                     **({'kind': 'a feed line damped by its port'} if m['Q'] < DAMPED_Q else {}))
+                for i, m in enumerate(found)]
+        about = (f"Palace's eigenmodes above {run.fmin / 1e9:g} GHz, "
+                 + ("in the metal can" if box == 'pec' else "the open board (radiation in Q)")
+                 + "; Q loaded by the ports' resistors" + (", the copper's loss" if s.palace_loss else "")
+                 + f" and the dielectric's tan d; Q_ext: each port's share. A Q under {DAMPED_Q:g} is a feed line "
+                 "damped by its port's resistor, not a resonance")
+        for r in rows:
+            ext = ', '.join(f"{p} {q:.4g}" for p, q in r['q_ext'].items())
+            run.log(f"  palace mode {r['mode']}: {r['f_ghz']:.5g} GHz, Q {r['Q']:.4g}" + (f" (Q_ext {ext})" if ext else '')
+                    + (f": {r['kind']}" if r.get('kind') else ''))
+        out = dict(about=about, rows=rows)
+        js = run.path('_palace_modes.json')
+        with open(js, 'w') as fh:
+            json.dump(out, fh, indent=1)
+        run.wrote('eigenmodes, Palace (JSON)', js)
+        return out
 
     def _antenna(self, run, prep, S):
         """Antenna mode: the far field of the driven port (the first of --excite, else the first port) in a second
