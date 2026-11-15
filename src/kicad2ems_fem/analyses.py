@@ -8,6 +8,8 @@ and lay the answers side by side.
     elmer_cap       the capacitance between nets     (python -m kicad2ems_fem.elmer.cap)
     palace_cap      the same, by Palace              (python -m kicad2ems_fem.palace.cap)
     elmer_mag       wound coils beside ferrite       (python -m kicad2ems_fem.elmer.mag): its own question, no board
+    palace_pdn      a rail's impedance at its loads   (python -m kicad2ems_fem.palace.pdn): the rail pcbqs's PDN run
+                    found, each part a port at its pads, closed by its parts after the solve
     palace_loop     a converter's input loop         (python -m kicad2ems_fem.palace.loop): the loop pcbqs's near
                     field found, its inductance again in 3D
 
@@ -353,6 +355,68 @@ class PalaceLoop(_Fem):
                         columns=['f (MHz)', 'Palace (nH)', 'pcbqs (nH)', 'Palace / pcbqs'], rows=rows,
                         formats=['.4g', '.4g', '.4g', None]))],
                     notes=notes, footer=f"Palace, {r.get('tets', 0):,} tetrahedra, {_seconds(r):.0f} s")
+
+
+class PalacePDN(_Fem):
+    """A rail's PDN in Palace (R-E22): the rail of the board's newest pcbqs PDN run, each part a lumped port at its
+    pads, the bare copper solved in 3D and closed by the run's parts; each load's |Z| beside pcbqs's. Palace stays
+    out of pcbqs: this engine reads pcbqs's result file, not pcbqs."""
+    name, label, engine, program = 'palace_pdn', 'Rail impedance (Palace)', 'Palace', 'palace'
+    tool = module = 'kicad2ems_fem.palace.pdn'
+    about = "a rail's impedance at its loads in 3D, beside pcbqs's PDN"
+    order, result, provides = 36, 'pdn_palace.json', ('pdn',)
+
+    def options(self):
+        return [dict(o, required=False) if o['key'] == 'pdn' else o for o in super().options()]
+
+    def missing(self, values, board, results=None):
+        if str(values.get('pdn') or '').strip() or (results or {}).get('pdn'):
+            return []
+        return [dict(key='pdn', text="run the PDN (pcbqs) first: its rail and parts are what Palace solves")]
+
+    def command(self, values, board, out, preview=False, results=None):
+        run = str(values.get('pdn') or '').strip() or (results or {}).get('pdn')
+        if not run:
+            raise ValueError("run the PDN (pcbqs) first: its rail and parts are what Palace solves")
+        cmd = [sys.executable, '-m', self.module, '--pdn', str(run), '--out', str(out)]
+        for o in self.options():
+            v = str(values.get(o['key']) if values.get(o['key']) is not None else '').strip()
+            if o['key'] not in ('pdn', 'out') and v and v != str(o['default']):
+                cmd += [o['flag'], v]
+        return cmd
+
+    def status(self, line):
+        return line.split(':', 1)[1].strip()[:160] if line.startswith('palace pdn:') else None
+
+    def report(self, folder):
+        r = self._read(folder)
+        if not r or r.get('tool') != self.module:
+            return None
+        f = r['frequencies_Hz']
+        sections = []
+        for load, z in r['z'].items():
+            pq = z.get('pcbqs_mag') or [None] * len(f)
+            rows = [[fi / 1e6, m * 1e3, p * 1e3 if p else '', f"{m / p:.3f}" if p else '']
+                    for fi, m, p in zip(f, z['mag'], pq)]
+            sections.append(dict(title=f"{load}: |Z|", table=dict(columns=['f (MHz)', 'Palace (mOhm)', 'pcbqs (mOhm)',
+                                                                          'Palace / pcbqs'], rows=rows,
+                                                                 formats=['.4g', '.4g', '.4g', None])))
+        bare = r.get('bare_vs_pcbqs') or {}
+        notes = ["Each part is a lumped port across its copper's gap between rail and ground at the part (a series "
+                 "part's: between its pads); the decaps and the regulator are closed by the run's values after the "
+                 "solve, the loads left open: the copper from the pads to the planes is Palace's own.",
+                 "Palace's copper is PEC and its solve full-wave: below a few MHz pcbqs's PDN is the answer."]
+        if bare:
+            notes.append("The bare network (no part) against pcbqs's, |Z| Palace / pcbqs: " + '; '.join(
+                f"{k} {min(v):.2f}..{max(v):.2f}" for k, v in bare.items()))
+        if r.get('left_out'):
+            notes.append(f"No port of their own (open in both): {', '.join(r['left_out'])}")
+        last = next(iter(r['z'].values()))
+        return dict(title=f"Rail impedance (Palace): {r['rail']}",
+                    summary=f"{next(iter(r['z']))}: |Z| {last['mag'][-1] * 1e3:.3g} mOhm at {f[-1] / 1e6:g} MHz"
+                            + (f" (pcbqs {last['pcbqs_mag'][-1] * 1e3:.3g})" if last.get('pcbqs_mag') else ''),
+                    sections=sections, notes=notes,
+                    footer=f"Palace, {r.get('tets', 0):,} tetrahedra, {_seconds(r):.0f} s")
 
 
 class ElmerMag(_Fem):

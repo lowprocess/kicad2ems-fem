@@ -187,6 +187,21 @@ unknowns: by default what 70 % of the memory available holds at Palace's 12 MB a
 double the mesh). On `rf_shielded` it took twice the time of the default mesh for a slightly coarser answer, so
 the default stays `feature = 4`; `amr` is for checking that an answer has settled.
 
+### A rail's impedance
+
+`python -m kicad2ems_fem.palace.pdn --pdn <a pcbqs PDN run> --out pdn_palace`, and in a study the engine
+*Rail impedance (Palace)* of the power-integrity question, which takes the board's newest pcbqs PDN run: its rail
+solved again in 3D. Each part on the rail is a lumped port across its copper's gap between rail and ground at the
+part (a pour's edge to the next, or pad to pad; a series part's between its pads), so the copper from the pads to
+the planes is Palace's own; the bare copper's port matrix is closed after the solve by the run's parts (the decaps'
+C, ESR and ESL or their vendor files, the regulator's R + L or its file), the loads left open. A part with no gap of
+its own (a regulator's output pad whose nearest ground lies past a decap's) is left out, open as in pcbqs's bare
+matrix. `pdn_palace.json` has each load's |Z| beside pcbqs's and, where the run wrote `--ports-touchstone`, the bare
+matrix against pcbqs's. On pcbqs's buck example's output rail (two layers, the out and GND pours 0.4 mm apart on
+F.Cu) Palace reads the bare rail's |Z| 0.68 of pcbqs's and the loaded J2's inductance 0.45 of it, steadily from 1 to
+550 MHz: the ground pour beside the rail on its own layer, which pcbqs's plane pair (rail on one layer, ground on
+another, vias between) leaves out. 42,000 tetrahedra, 36 s.
+
 ### A converter's input loop
 
 `python -m kicad2ems_fem.palace.loop --mqs <a pcbqs near-field run> --out loop`, and in a study the engine

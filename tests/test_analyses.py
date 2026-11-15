@@ -13,7 +13,7 @@ from kicad2ems import analyses as registry_module, study
 from kicad2ems_fem import analyses as A
 from kicad2ems_fem.elmer import run as elmer
 
-ALL = (A.ElmerDC, A.ElmerThermal, A.ElmerCap, A.PalaceCap, A.ElmerMag, A.PalaceLoop)
+ALL = (A.ElmerDC, A.ElmerThermal, A.ElmerCap, A.PalaceCap, A.ElmerMag, A.PalaceLoop, A.PalacePDN)
 
 
 class _EP:
@@ -34,12 +34,12 @@ def registered(monkeypatch):
 
 
 def test_they_register_as_engines_of_questions_others_answer_too(registered):
-    assert list(registered) == ['elmer_dc', 'palace_loop', 'elmer_mag', 'elmer_thermal', 'elmer_cap', 'palace_cap']
+    assert list(registered) == ['elmer_dc', 'palace_loop', 'palace_pdn', 'elmer_mag', 'elmer_thermal', 'elmer_cap', 'palace_cap']
     assert not registry_module.broken
     es = study.engines()
-    assert [es[n].provides for n in registered] == [('dc',), ('nearfield',), ('coils',), ('thermal',), ('capacitance',),
-                                                    ('capacitance',)]
-    assert [es[n].label for n in registered] == ['Elmer', 'Palace', 'Elmer', 'Elmer', 'Elmer', 'Palace']
+    assert [es[n].provides for n in registered] == [('dc',), ('nearfield',), ('pdn',), ('coils',), ('thermal',),
+                                                    ('capacitance',), ('capacitance',)]
+    assert [es[n].label for n in registered] == ['Elmer', 'Palace', 'Palace', 'Elmer', 'Elmer', 'Elmer', 'Palace']
     rows = {r['question'].name: r for g in study.study_tree() for r in g['questions']}
     assert [e.name for e in rows['capacitance']['engines']] == ['elmer_cap', 'palace_cap']
     import tomllib
